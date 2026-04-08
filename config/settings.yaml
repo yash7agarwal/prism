@@ -1,0 +1,26 @@
+# MMT-OS Settings
+
+device:
+  serial: ""           # ADB device serial (empty = use first connected)
+  emulator_avd: "mmt_test"
+  screenshot_dir: ".tmp/screenshots"
+  recording_dir: ".tmp/recordings"
+
+agent:
+  model: "claude-sonnet-4-6"
+  fast_model: "claude-haiku-4-5-20251001"
+  max_tokens: 4096
+  max_parallel_runners: 5    # Max ScenarioRunnerAgents running simultaneously
+  exploration_depth: 20      # Max screens to visit per flow exploration
+
+uat:
+  evidence_dir: ".tmp/evidence"
+  reports_dir: "reports"
+  default_wait_ms: 1500      # ms to wait after each action
+
+web:
+  host: "0.0.0.0"
+  port: 8000
+
+notifications:
+  telegram_enabled: false

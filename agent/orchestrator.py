@@ -1,0 +1,650 @@
+"""
+agent/orchestrator.py — UAT run orchestrator
+
+Thin coordinator that:
+1. Installs builds
+2. Spawns FlowExplorerAgent to map the feature
+3. Generates test scenarios from the feature description + screen map
+4. Spawns ScenarioRunnerAgents in parallel (max 5 at a time)
+5. Runs VariantDetector to group accounts
+6. Collects all results
+7. Saves a structured run summary for Phase 3 evaluation
+
+This agent holds only summaries — raw evidence stays in .tmp/evidence/
+"""
+from __future__ import annotations
+
+import concurrent.futures
+import json
+import logging
+import os
+import re
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from agent.flow_explorer_agent import FlowExplorerAgent
+from agent.scenario_runner_agent import ScenarioRunnerAgent
+from agent.variant_detector import VariantDetector
+from agent.diff_agent import DiffAgent
+from agent.evaluator_agent import EvaluatorAgent
+from agent.report_writer_agent import ReportWriterAgent
+from tools.android_device import AndroidDevice
+from tools.apk_manager import install_apk, launch_app, get_apk_version
+from tools.report_generator import save_json_export, to_jira_issues, to_slack_summary
+from utils.claude_client import ask
+from utils.config import get
+
+logger = logging.getLogger(__name__)
+
+# Prompt used to generate test scenarios from feature + screen graph
+_SCENARIO_GEN_SYSTEM = """\
+You are a senior QA architect designing UAT scenarios for a MakeMyTrip Android app feature.
+Generate a comprehensive scenario suite covering all important user flows.
+Return ONLY valid JSON — no markdown fences, no prose."""
+
+_SCENARIO_GEN_PROMPT = """\
+Feature under test:
+{feature_description}
+
+Acceptance criteria:
+{acceptance_criteria}
+
+Screen graph summary (screens discovered during exploration):
+{screen_summary}
+
+Generate between 10 and 20 test scenarios as a JSON array.
+Each scenario must follow this exact structure:
+{{
+  "name": "<short unique scenario name>",
+  "category": "<one of: happy_path | edge_case | state_variant | regression>",
+  "steps": ["<step 1>", "<step 2>", ...],
+  "expected_outcome": "<clear description of what success looks like>",
+  "severity": "<one of: critical | high | medium | low>"
+}}
+
+Rules:
+- Include at least 3 happy_path, 3 edge_case, 2 state_variant, 2 regression scenarios
+- Steps should be concrete and actionable (e.g. "Tap the 'Search Hotels' button")
+- Cover happy path, error states, boundary conditions, and back-navigation
+- Prioritise critical and high severity scenarios first in the list
+"""
+
+
+class Orchestrator:
+    """
+    Top-level UAT run coordinator.
+
+    Usage:
+        orch = Orchestrator(
+            candidate_apk="path/to/new.apk",
+            feature_description="hotel detail gallery redesign",
+            accounts=[{"id": "acc1", "email": "...", "password": "..."}],
+            acceptance_criteria="Gallery should show 15 images",
+        )
+        summary = orch.run()
+    """
+
+    def __init__(
+        self,
+        candidate_apk: str,
+        feature_description: str,
+        accounts: list[dict],
+        baseline_apk: str | None = None,
+        acceptance_criteria: str = "",
+        run_id: str | None = None,
+    ):
+        self.candidate_apk = candidate_apk
+        self.baseline_apk = baseline_apk
+        self.feature_description = feature_description
+        self.accounts = accounts
+        self.acceptance_criteria = acceptance_criteria
+
+        # Auto-generate a run_id if not provided
+        if run_id:
+            self.run_id = run_id
+        else:
+            feature_slug = re.sub(r"[^a-z0-9]+", "_", feature_description.lower())[:30]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.run_id = f"{feature_slug}_{timestamp}"
+
+        # Ensure reports directory exists
+        Path("reports").mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"[Orchestrator] Initialized run_id={self.run_id}")
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    def run(self) -> dict:
+        """
+        Execute the full UAT run.
+
+        Returns a run summary dict containing scenario results, variant groups,
+        screen graph metadata, and aggregate stats.
+        """
+        logger.info(f"[Orchestrator] === UAT Run START: {self.run_id} ===")
+        start_time = time.time()
+
+        # Step 1 — Connect to device
+        logger.info("[Orchestrator] Connecting to device...")
+        device = AndroidDevice()
+
+        # Step 2 — Install candidate APK
+        logger.info(f"[Orchestrator] Installing candidate APK: {self.candidate_apk}")
+        package_name = install_apk(self.candidate_apk, serial=device.serial)
+        apk_version = get_apk_version(self.candidate_apk)
+        logger.info(
+            f"[Orchestrator] Installed: {package_name} "
+            f"v{apk_version.get('version_name', '?')} "
+            f"(code {apk_version.get('version_code', '?')})"
+        )
+
+        # Step 3 — Launch app and run FlowExplorerAgent
+        logger.info("[Orchestrator] Launching app for flow exploration...")
+        launch_app(package_name, serial=device.serial)
+        time.sleep(3)  # allow app to settle
+
+        explorer = FlowExplorerAgent(
+            device=device,
+            feature_description=self.feature_description,
+            entry_package=package_name,
+            max_depth=get("agent.flow_explorer_max_depth", 20),
+        )
+        logger.info("[Orchestrator] Running FlowExplorerAgent...")
+        screen_graph = explorer.explore()
+        logger.info(
+            f"[Orchestrator] FlowExplorer complete: "
+            f"{screen_graph['total_screens']} screens found"
+        )
+
+        # Step 4 — Generate test scenarios
+        logger.info("[Orchestrator] Generating test scenarios...")
+        scenarios = self._generate_scenarios(
+            self.feature_description, screen_graph, self.acceptance_criteria
+        )
+        logger.info(f"[Orchestrator] Generated {len(scenarios)} scenarios")
+
+        # Step 5 — Variant fingerprinting per account
+        # TODO(v1): In this version, accounts are pre-logged-in manually.
+        # The user must ensure each account session is active before running.
+        # Future: auto-login using account credentials via the login flow.
+        logger.info("[Orchestrator] Running variant fingerprinting per account...")
+        variant_detector = VariantDetector(run_id=self.run_id)
+        fingerprints: list[dict] = []
+
+        for account in self.accounts:
+            account_id = account["id"]
+            logger.info(f"[Orchestrator] Fingerprinting account: {account_id}")
+            # TODO(v1): Auto-login with account["email"] / account["password"] not yet implemented.
+            # Assumes app is already showing the logged-in home screen for this account.
+            try:
+                fp = variant_detector.fingerprint_session(device, account_id)
+                fingerprints.append(fp)
+            except Exception as e:
+                logger.warning(
+                    f"[Orchestrator] Fingerprinting failed for {account_id}: {e}"
+                )
+
+        # Step 6 — Group accounts by variant
+        variant_groups = variant_detector.group_by_variant(fingerprints)
+        logger.info(f"[Orchestrator] Variant groups: {variant_groups}")
+
+        # Step 7 — Run scenarios across all accounts
+        logger.info("[Orchestrator] Running scenario suite across accounts...")
+        all_results = self._run_scenarios_parallel(
+            device=device,
+            scenarios=scenarios,
+            accounts=self.accounts,
+            run_id=self.run_id,
+        )
+
+        # Step 8 — Classify findings using variant info
+        logger.info("[Orchestrator] Classifying findings...")
+        classified_results = self._classify_results(all_results, variant_groups, variant_detector)
+
+        # Step 9 — Save run summary
+        elapsed = round(time.time() - start_time, 1)
+        summary_path = self._save_run_summary(classified_results, variant_groups, screen_graph)
+
+        # Step 10 — Print summary stats
+        stats = self._compute_stats(classified_results)
+        self._print_summary(stats, elapsed, summary_path)
+
+        run_summary = {
+            "run_id": self.run_id,
+            "feature": self.feature_description,
+            "candidate_apk": self.candidate_apk,
+            "baseline_apk": self.baseline_apk,
+            "package_name": package_name,
+            "apk_version": apk_version,
+            "total_accounts": len(self.accounts),
+            "total_scenarios": len(scenarios),
+            "variant_groups": variant_groups,
+            "screen_graph_summary": {
+                "total_screens": screen_graph["total_screens"],
+                "exploration_summary": screen_graph.get("summary", ""),
+            },
+            "results": classified_results,
+            "stats": stats,
+            "elapsed_seconds": elapsed,
+            "summary_path": summary_path,
+        }
+
+        # Step 11 — Phase 3: evaluate results + generate report
+        report_path = self.generate_report(run_summary=run_summary, scenarios=scenarios)
+        run_summary["report_path"] = report_path
+        print(f"  Report              : {report_path}")
+
+        logger.info(f"[Orchestrator] === UAT Run END: {self.run_id} ===")
+        return run_summary
+
+    # ------------------------------------------------------------------
+    # Scenario generation
+    # ------------------------------------------------------------------
+
+    def _generate_scenarios(
+        self,
+        feature_description: str,
+        screen_graph: dict,
+        acceptance_criteria: str,
+    ) -> list[dict]:
+        """
+        Use Claude to generate 10–20 test scenarios from the feature + screen graph.
+
+        Returns a list of scenario dicts:
+            {"name": str, "category": str, "steps": [str], "expected_outcome": str, "severity": str}
+        """
+        # Build a condensed screen summary for the prompt
+        screens = screen_graph.get("screens", [])
+        screen_lines = []
+        for s in screens[:15]:  # cap at 15 screens to avoid prompt overflow
+            elements_preview = ", ".join(s.get("key_elements", [])[:5])
+            screen_lines.append(
+                f"- {s['screen_id']} (depth {s['depth']}): {elements_preview}"
+            )
+        screen_summary = "\n".join(screen_lines) if screen_lines else "No screens discovered"
+
+        prompt = _SCENARIO_GEN_PROMPT.format(
+            feature_description=feature_description,
+            acceptance_criteria=acceptance_criteria or "Not specified",
+            screen_summary=screen_summary,
+        )
+
+        try:
+            raw = ask(
+                prompt,
+                system=_SCENARIO_GEN_SYSTEM,
+                max_tokens=4096,
+            )
+            scenarios = json.loads(raw)
+            if not isinstance(scenarios, list):
+                raise ValueError("Expected a JSON array of scenarios")
+
+            # Validate and sanitise each scenario
+            validated: list[dict] = []
+            for s in scenarios:
+                if not isinstance(s, dict):
+                    continue
+                validated.append(
+                    {
+                        "name": str(s.get("name", "Unnamed scenario")),
+                        "category": str(
+                            s.get("category", "happy_path")
+                        ) if s.get("category") in {
+                            "happy_path", "edge_case", "state_variant", "regression"
+                        } else "happy_path",
+                        "steps": [str(step) for step in s.get("steps", [])],
+                        "expected_outcome": str(s.get("expected_outcome", "")),
+                        "severity": str(
+                            s.get("severity", "medium")
+                        ) if s.get("severity") in {
+                            "critical", "high", "medium", "low"
+                        } else "medium",
+                    }
+                )
+            logger.info(f"[Orchestrator] Parsed {len(validated)} valid scenarios")
+            return validated
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            logger.error(f"[Orchestrator] Scenario generation failed: {e}")
+            # Return a minimal fallback scenario so the run can continue
+            return [
+                {
+                    "name": "Baseline smoke test",
+                    "category": "happy_path",
+                    "steps": [
+                        "Take a screenshot of the current screen",
+                        "Verify the feature area is visible",
+                    ],
+                    "expected_outcome": "Feature area is accessible and renders correctly",
+                    "severity": "critical",
+                }
+            ]
+
+    # ------------------------------------------------------------------
+    # Parallel scenario execution
+    # ------------------------------------------------------------------
+
+    def _run_scenarios_parallel(
+        self,
+        device: AndroidDevice,
+        scenarios: list[dict],
+        accounts: list[dict],
+        run_id: str,
+    ) -> list[dict]:
+        """
+        Run all scenarios across all accounts.
+
+        NOTE (v1): With a single physical device we cannot truly parallelise at the
+        device level, so we use ThreadPoolExecutor with max_workers=1 and iterate
+        accounts × scenarios sequentially. The structure is ready for multi-device
+        parallelism in future: increase max_workers and pass separate device instances.
+
+        TODO(future): Accept a list of devices and distribute accounts across them.
+        """
+        max_workers = get("agent.max_parallel_runners", 5)
+        # v1 safety: clamp to 1 for single device
+        effective_workers = 1
+        logger.info(
+            f"[Orchestrator] Running {len(scenarios)} scenarios × {len(accounts)} accounts "
+            f"(max_workers={effective_workers}, configured={max_workers})"
+        )
+
+        tasks: list[tuple[dict, dict]] = [
+            (scenario, account)
+            for account in accounts
+            for scenario in scenarios
+        ]
+
+        results: list[dict] = []
+
+        def _run_one(task: tuple[dict, dict]) -> dict:
+            scenario, account = task
+            runner = ScenarioRunnerAgent(
+                device=device,
+                scenario=scenario,
+                account_id=account["id"],
+                feature_description=self.feature_description,
+                run_id=run_id,
+            )
+            return runner.run()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            futures = {executor.submit(_run_one, task): task for task in tasks}
+            for future in concurrent.futures.as_completed(futures):
+                task = futures[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    logger.info(
+                        f"[Orchestrator] Completed: '{result['scenario_name']}' | "
+                        f"account={result['account_id']} | status={result['status']}"
+                    )
+                except Exception as e:
+                    scenario, account = task
+                    logger.error(
+                        f"[Orchestrator] Task failed for scenario='{scenario['name']}' "
+                        f"account='{account['id']}': {e}"
+                    )
+                    results.append(
+                        {
+                            "scenario_name": scenario["name"],
+                            "account_id": account["id"],
+                            "status": "failed",
+                            "steps_taken": [],
+                            "final_outcome": f"Task executor error: {e}",
+                            "evidence_pack": {},
+                            "error": str(e),
+                        }
+                    )
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Result classification
+    # ------------------------------------------------------------------
+
+    def _classify_results(
+        self,
+        results: list[dict],
+        variant_groups: dict,
+        variant_detector: VariantDetector,
+    ) -> list[dict]:
+        """
+        Enrich each result with a classification (REGRESSION / VARIANT_DIFFERENCE / INCONCLUSIVE).
+        Groups same-named failing scenarios across accounts for accurate classification.
+        """
+        # Build a map: scenario_name -> list of failing account_ids
+        failing_by_scenario: dict[str, list[str]] = {}
+        for r in results:
+            if r["status"] != "completed":
+                sname = r["scenario_name"]
+                failing_by_scenario.setdefault(sname, [])
+                failing_by_scenario[sname].append(r["account_id"])
+
+        enriched: list[dict] = []
+        for r in results:
+            classification = None
+            if r["status"] != "completed":
+                sname = r["scenario_name"]
+                failing_accounts = failing_by_scenario.get(sname, [r["account_id"]])
+                finding = {
+                    "account_id": r["account_id"],
+                    "failing_accounts": failing_accounts,
+                }
+                classification = variant_detector.classify_finding(finding, variant_groups)
+            enriched.append({**r, "classification": classification})
+
+        return enriched
+
+    # ------------------------------------------------------------------
+    # Reporting
+    # ------------------------------------------------------------------
+
+    def _save_run_summary(
+        self,
+        results: list[dict],
+        variant_groups: dict,
+        screen_graph: dict,
+    ) -> str:
+        """Serialise the full run summary to reports/run_summary_{run_id}.json."""
+        report_path = Path("reports") / f"run_summary_{self.run_id}.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Strip large evidence packs from the summary (raw evidence stays in .tmp/)
+        slim_results = []
+        for r in results:
+            slim = {k: v for k, v in r.items() if k != "evidence_pack"}
+            slim["evidence_dir"] = r.get("evidence_pack", {}).get("session_dir", "")
+            slim_results.append(slim)
+
+        summary = {
+            "run_id": self.run_id,
+            "feature": self.feature_description,
+            "candidate_apk": self.candidate_apk,
+            "baseline_apk": self.baseline_apk,
+            "acceptance_criteria": self.acceptance_criteria,
+            "generated_at": datetime.now().isoformat(),
+            "variant_groups": variant_groups,
+            "screen_graph": {
+                "total_screens": screen_graph["total_screens"],
+                "summary": screen_graph.get("summary", ""),
+                "screen_ids": [s["screen_id"] for s in screen_graph.get("screens", [])],
+            },
+            "results": slim_results,
+            "stats": self._compute_stats(results),
+        }
+
+        with open(report_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        logger.info(f"[Orchestrator] Run summary saved: {report_path}")
+        return str(report_path)
+
+    @staticmethod
+    def _compute_stats(results: list[dict]) -> dict:
+        total = len(results)
+        completed = sum(1 for r in results if r["status"] == "completed")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        blocked = sum(1 for r in results if r["status"] == "blocked")
+        regressions = sum(
+            1 for r in results if r.get("classification") == "REGRESSION"
+        )
+        variant_diffs = sum(
+            1 for r in results if r.get("classification") == "VARIANT_DIFFERENCE"
+        )
+        return {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "blocked": blocked,
+            "pass_rate": round(completed / total * 100, 1) if total else 0.0,
+            "regressions": regressions,
+            "variant_differences": variant_diffs,
+        }
+
+    @staticmethod
+    def _print_summary(stats: dict, elapsed: float, summary_path: str) -> None:
+        print("\n" + "=" * 60)
+        print("UAT RUN SUMMARY")
+        print("=" * 60)
+        print(f"  Total scenario runs : {stats['total']}")
+        print(f"  Passed              : {stats['completed']}  ({stats['pass_rate']}%)")
+        print(f"  Failed              : {stats['failed']}")
+        print(f"  Blocked             : {stats['blocked']}")
+        print(f"  Regressions found   : {stats['regressions']}")
+        print(f"  Variant differences : {stats['variant_differences']}")
+        print(f"  Elapsed time        : {elapsed}s")
+        print(f"  Report              : {summary_path}")
+        print("=" * 60 + "\n")
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Report generation
+    # ------------------------------------------------------------------
+
+    def generate_report(
+        self,
+        run_summary: dict | None = None,
+        scenarios: list[dict] | None = None,
+    ) -> str:
+        """
+        Run Phase 3: evaluate results, compare builds, and write the UAT report.
+
+        Can be called standalone (loading run_summary from disk) or directly
+        from run() with the in-memory run_summary.
+
+        Returns the path to the saved Markdown report.
+        """
+        # Load run_summary from disk if not provided
+        if run_summary is None:
+            summary_path = Path("reports") / f"run_summary_{self.run_id}.json"
+            if not summary_path.exists():
+                raise FileNotFoundError(
+                    f"Run summary not found: {summary_path}. "
+                    "Run the UAT run first before generating a report."
+                )
+            with open(summary_path) as f:
+                run_summary = json.load(f)
+            logger.info(f"[Orchestrator] Loaded run_summary from {summary_path}")
+
+        feature = run_summary.get("feature", self.feature_description)
+        variant_groups = run_summary.get("variant_groups", {})
+        all_results = run_summary.get("results", [])
+
+        # Rebuild scenarios list from results if not provided
+        if scenarios is None:
+            seen: dict[str, dict] = {}
+            for r in all_results:
+                sname = r.get("scenario_name", "")
+                if sname not in seen:
+                    seen[sname] = {
+                        "name": sname,
+                        "category": r.get("category", "happy_path"),
+                        "expected_outcome": r.get("expected_outcome", ""),
+                        "severity": r.get("severity", "medium"),
+                    }
+            scenarios = list(seen.values())
+
+        # --- EvaluatorAgent ---
+        logger.info("[Orchestrator] Running EvaluatorAgent...")
+        evaluator = EvaluatorAgent(variant_groups=variant_groups)
+        evaluation = evaluator.evaluate_run(scenarios=scenarios, all_results=all_results)
+        logger.info(
+            f"[Orchestrator] Evaluation complete: "
+            f"verdict={evaluation['overall_verdict']} "
+            f"passed={evaluation['passed']} failed={evaluation['failed']}"
+        )
+
+        # --- DiffAgent (only if both baseline and candidate dirs are available) ---
+        diff_analysis: dict = {}
+        baseline_apk = run_summary.get("baseline_apk") or self.baseline_apk
+        candidate_apk = run_summary.get("candidate_apk") or self.candidate_apk
+
+        if baseline_apk and candidate_apk:
+            # Derive screenshot directories from APK paths (convention: .tmp/evidence/{run_id}/)
+            evidence_root = Path(get("uat.evidence_dir", ".tmp/evidence")) / self.run_id
+            baseline_dir = str(evidence_root / "baseline_screenshots")
+            candidate_dir = str(evidence_root / "candidate_screenshots")
+
+            if Path(baseline_dir).is_dir() and Path(candidate_dir).is_dir():
+                logger.info("[Orchestrator] Running DiffAgent...")
+                diff_agent = DiffAgent(
+                    baseline_dir=baseline_dir,
+                    candidate_dir=candidate_dir,
+                    feature_description=feature,
+                    run_id=self.run_id,
+                )
+                diff_analysis = diff_agent.analyze()
+                logger.info(
+                    f"[Orchestrator] DiffAgent complete: {diff_analysis.get('summary', '')}"
+                )
+            else:
+                logger.info(
+                    "[Orchestrator] Baseline/candidate screenshot dirs not found — "
+                    "skipping DiffAgent."
+                )
+        else:
+            logger.info(
+                "[Orchestrator] No baseline APK provided — skipping DiffAgent."
+            )
+
+        # --- ReportWriterAgent ---
+        logger.info("[Orchestrator] Running ReportWriterAgent...")
+        report_writer = ReportWriterAgent(run_id=self.run_id, reports_dir="reports")
+        report_path = report_writer.write_report(
+            run_summary=run_summary,
+            evaluation=evaluation,
+            diff_analysis=diff_analysis,
+            variant_groups=variant_groups,
+        )
+        logger.info(f"[Orchestrator] Report written: {report_path}")
+
+        # --- Save JSON export ---
+        json_export_path = save_json_export(
+            run_summary=run_summary,
+            evaluation=evaluation,
+            diff_analysis=diff_analysis,
+            run_id=self.run_id,
+            reports_dir="reports",
+        )
+        logger.info(f"[Orchestrator] JSON export saved: {json_export_path}")
+
+        # --- Slack summary (logged, not sent in v1) ---
+        slack_msg = to_slack_summary(
+            evaluation=evaluation,
+            run_id=self.run_id,
+            report_path=report_path,
+        )
+        logger.info(f"[Orchestrator] Slack summary:\n{slack_msg}")
+
+        # --- Jira issues (logged, not created in v1) ---
+        jira_issues = to_jira_issues(evaluation=evaluation, run_id=self.run_id)
+        if jira_issues:
+            logger.info(
+                f"[Orchestrator] {len(jira_issues)} Jira issue(s) ready "
+                f"(use MCP createJiraIssue to file them)"
+            )
+
+        return report_path
