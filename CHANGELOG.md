@@ -2,6 +2,19 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-04-09
+### Added
+- `agent/figma_journey_parser.py` — parses Figma file into full journey spec; classifies frames as main/sheet/persuasion/modal; extracts all text + CTAs; batched Claude enrichment (navigation steps + assertions per screen); exports all frames as PNG via Figma Images API
+- `agent/figma_uat_runner.py` — navigates app to each Figma screen, screenshots, compares via FigmaComparator, checks assertions (text via UI tree + visual via Claude vision), writes per-screen compliance report
+- `workflows/context_efficiency.md` — pre-task delegation checklist + 5 reusable agent templates (explore, log-analysis, debug-triage, deployment-monitor, parallel)
+- `memory/learnings.md` — 8 operational learnings incl. context waste patterns and deployment gotchas
+- `memory/patterns.md` — 8 reusable patterns with bad → correct delegation code examples
+
+### Changed
+- `telegram_bot/bot.py`: Figma URL conversation flow after APK upload; `/run_figma` command; `handle_text_message` auto-detects figma.com URLs; live progress notifications during Figma UAT
+- `agent/orchestrator.py`: `run_figma_uat()` classmethod — Figma-first UAT entry point (no baseline APK needed)
+- `CLAUDE.md`: mandatory pre-task delegation gate + 4 new anti-patterns (double-read, log inline, debug chunks, polling loops)
+
 ## [0.3.0] — 2026-04-09
 ### Added
 - `agent/health_monitor.py` — self-healing engine detecting APP_NOT_OPEN, APP_CRASHED, DEVICE_UNRESPONSIVE, NAVIGATION_STUCK, WRONG_SCREEN; auto-recovers with per-state playbooks; circuit breaker (3 attempts max); logs all gaps to `memory/gaps_log.jsonl`
