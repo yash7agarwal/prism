@@ -7,7 +7,7 @@ Usage:
     python telegram_bot/run_bot.py
 """
 
-if __name__ == "__main__":
-    from telegram_bot.bot import main
+from telegram_bot.bot import main
 
+if __name__ == "__main__":
     main()

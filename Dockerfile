@@ -60,4 +60,4 @@ RUN mkdir -p apks reports memory .tmp/evidence
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 # Default: run the Telegram bot (headless, always-on)
-CMD ["python3.11", "telegram_bot/run_bot.py"]
+CMD ["python3.11", "-m", "telegram_bot.run_bot"]

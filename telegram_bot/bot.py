@@ -135,10 +135,19 @@ def _run_uat_in_background(
         # Lazy import to avoid circular deps and slow startup
         from agent.orchestrator import Orchestrator  # noqa: PLC0415
 
+        # Load accounts from JSON file
+        accounts_path = Path(accounts_file)
+        if accounts_path.exists():
+            with open(accounts_path) as f:
+                accounts = json.load(f)
+        else:
+            accounts = []
+
         orchestrator = Orchestrator(
+            candidate_apk=str(_CANDIDATE_APK),
+            feature_description=feature,
+            accounts=accounts,
             run_id=run_id,
-            feature=feature,
-            accounts_file=accounts_file,
         )
         result = orchestrator.run()
         _tracker.complete(run_id, result)
