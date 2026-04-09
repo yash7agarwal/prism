@@ -1,20 +1,20 @@
-# MMT-OS (Product OS) · v0.1.0
+# MMT-OS (Product OS) · v0.2.0
 
 > AI-native operating system for MakeMyTrip product managers — starting with an autonomous Android app UAT tool.
 
-MMT-OS is a compounding intelligence system that autonomously tests Android app builds, compares versions, detects regressions vs A/B variant differences, and generates evidence-backed UAT reports. Built on the AOS (Agent Operating System) philosophy: every run makes the system smarter.
+MMT-OS is a compounding intelligence system that autonomously launches the MakeMyTrip Android app, navigates to any feature, captures evidence, compares builds, and generates structured UAT reports. Built on the AOS philosophy: every run makes the system smarter.
 
 ---
 
 ## What It Does
 
-- **Autonomous Android UAT** — installs two APK builds, explores flows, executes test scenarios, captures screenshots
-- **A/B Variant Detection** — fingerprints post-login UI per account, groups by variant, prevents false regression reports
+- **Fully autonomous Android UAT** — launches app, navigates to feature, captures screenshots end-to-end with zero manual steps
+- **Screen state verification** — checks live UI tree before every action; knows if it's on the right screen, past the gallery, or in the wrong app
+- **A/B variant detection** — fingerprints post-login UI per account, groups by variant, prevents false regression reports
 - **Multi-agent architecture** — orchestrator spawns parallel subagents (one per scenario × account), preserving context bandwidth
 - **Build comparison** — visual diff (pixelmatch) between baseline and candidate screenshots, per-screen change classification
 - **Evidence-backed reports** — structured Markdown UAT reports with scenario matrix, defect log, variant analysis, build diff
 - **MCP server** — 13 tools exposing Android device control to Claude (tap, swipe, screenshot, UI tree, APK install)
-- **Jira/Slack export** — converts defects to Jira-ready issue dicts; generates Slack summary blocks
 - **Compounding memory** — learnings, patterns, decisions, and account variant history stored and reused across runs
 
 ---
@@ -24,7 +24,18 @@ MMT-OS is a compounding intelligence system that autonomously tests Android app 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   PM Interface                       │
-│           CLI (run_uat.py) · Web (Phase 4)          │
+│     CLI (run_details_uat.py / run_uat.py)           │
+└─────────────────────┬───────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────┐
+│           Pre-flight: ensure_on_details_page         │
+│   launch_mmt → navigate_to_hotel → verify UI state  │
+└─────────────────────┬───────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────┐
+│         Claude Exploration Agent (tool loop)         │
+│  check_screen · scroll_fast · take_screenshot        │
+│  open_mmt_app · scroll_down · finish                 │
 └─────────────────────┬───────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────┐
@@ -37,7 +48,6 @@ MMT-OS is a compounding intelligence system that autonomously tests Android app 
 │Expl │      │Runner  │     │ Detector │
 │Agent│      │Agent×N │     │          │
 └──┬──┘      └───┬───┘     └────┬─────┘
-   │              │              │
    └──────────────▼──────────────┘
               Evidence Packs
                    │
@@ -49,12 +59,11 @@ MMT-OS is a compounding intelligence system that autonomously tests Android app 
 ┌──────────────────▼──────────────────┐
 │         MCP Server (13 tools)        │
 │  screenshot · tap · swipe · ui_tree  │
-│  install_apk · launch_app · ...      │
 └──────────────────┬──────────────────┘
                    │
 ┌──────────────────▼──────────────────┐
 │        Android Device / Emulator     │
-│        (uiautomator2 + ADB)          │
+│   uiautomator2 + adb shell input    │
 └─────────────────────────────────────┘
 ```
 
@@ -64,9 +73,10 @@ MMT-OS is a compounding intelligence system that autonomously tests Android app 
 
 ```
 MMT-OS/
+├── run_details_uat.py           # Autonomous hotel details page UAT (10.7.0 vs 11.3.0)
 ├── agent/
 │   ├── orchestrator.py          # Main UAT coordinator
-│   ├── run_uat.py               # CLI entry point
+│   ├── run_uat.py               # CLI entry point (multi-account)
 │   ├── flow_explorer_agent.py   # Maps app screens via Claude tool loop
 │   ├── scenario_runner_agent.py # Executes one scenario × one account
 │   ├── variant_detector.py      # A/B fingerprinting + grouping
@@ -76,10 +86,10 @@ MMT-OS/
 ├── mcp_server/
 │   └── server.py                # FastMCP server (13 device tools)
 ├── tools/
-│   ├── android_device.py        # uiautomator2 wrapper
+│   ├── android_device.py        # uiautomator2 + adb shell wrapper
 │   ├── apk_manager.py           # ADB/aapt APK management
 │   ├── screenshot.py            # EvidenceCapture with step logs
-│   ├── visual_diff.py           # Screenshot comparison
+│   ├── visual_diff.py           # Screenshot comparison (pixelmatch + PIL)
 │   └── report_generator.py      # Jira, Slack, JSON export
 ├── utils/
 │   ├── claude_client.py         # Anthropic SDK wrapper
@@ -131,21 +141,33 @@ bash setup_emulator.sh
 
 ## Usage
 
+### Autonomous Hotel Details UAT (primary entry point)
+
+```bash
+# Capture baseline (v10.7.0) — auto-launches app, navigates to hotel, captures all sections
+.venv/bin/python3 run_details_uat.py --phase baseline
+
+# Capture candidate (v11.3.0)
+.venv/bin/python3 run_details_uat.py --phase candidate
+
+# Generate comparison report
+.venv/bin/python3 run_details_uat.py --phase report
+
+# Full end-to-end (installs both APKs, captures both, generates report)
+.venv/bin/python3 run_details_uat.py --phase all
+
+# Specify hotel to navigate to
+.venv/bin/python3 run_details_uat.py --phase candidate --hotel "The Leela Delhi"
+```
+
+### Multi-account / Multi-scenario UAT
+
 | Task | Command |
 |------|---------|
 | Run full UAT (single build) | `.venv/bin/python3 agent/run_uat.py --candidate new.apk --feature "hotel gallery" --accounts accounts.json` |
-| Run build comparison | `.venv/bin/python3 agent/run_uat.py --baseline old.apk --candidate new.apk --feature "checkout coupon" --accounts accounts.json` |
+| Run build comparison | `.venv/bin/python3 agent/run_uat.py --baseline old.apk --candidate new.apk --feature "checkout" --accounts accounts.json` |
 | Start MCP server (for Claude Code) | `.venv/bin/python3 mcp_server/server.py` |
 | Validate stack | `.venv/bin/python3 smoke_test.py` |
-
-**accounts.json format:**
-```json
-[
-  {"id": "acc1", "type": "returning_user"},
-  {"id": "acc2", "type": "new_user"},
-  {"id": "acc3", "type": "premium_user"}
-]
-```
 
 Reports are saved to `reports/uat_report_{run_id}.md`.
 
@@ -164,6 +186,13 @@ Reports are saved to `reports/uat_report_{run_id}.md`.
 ---
 
 ## Changelog
+
+### [0.2.0] — 2026-04-09
+- Fully autonomous UAT runner: auto-launches MMT, navigates to hotel, captures all sections
+- Screen state verification via live UI tree (`on_details_page`, `gallery_cleared`)
+- Gallery escape with safe mid-screen `scroll_fast` (avoids Android home gesture zone)
+- Agent tools: `check_screen`, `open_mmt_app`, `scroll_fast`, `scroll_down` with new-content detection
+- Fixed `tap()`, `swipe()`, `swipe_coords()` to use `adb shell input` (INJECT_EVENTS fix for MIUI/Motorola)
 
 ### [0.1.0] — 2026-04-09
 - Initial release: full agent stack (Phases 1–3)

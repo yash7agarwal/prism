@@ -52,8 +52,8 @@ class AndroidDevice:
             raise AndroidDeviceError(f"Failed to dump UI hierarchy: {e}") from e
 
     def tap(self, x: int, y: int) -> None:
-        """Tap at coordinates."""
-        self.d.click(x, y)
+        """Tap at coordinates via adb shell input tap (avoids INJECT_EVENTS on MIUI)."""
+        self.d.shell(f"input tap {x} {y}")
         time.sleep(get("uat.default_wait_ms", 1500) / 1000)
 
     def tap_text(self, text: str, exact: bool = False) -> bool:
@@ -78,16 +78,29 @@ class AndroidDevice:
             return False
 
     def swipe(self, direction: str, duration: float = 0.3) -> None:
-        """Swipe in a direction: up, down, left, right."""
+        """Swipe in a direction: up, down, left, right.
+        Uses adb shell input swipe to avoid INJECT_EVENTS permission issues on MIUI."""
         valid = {"up", "down", "left", "right"}
         if direction not in valid:
             raise AndroidDeviceError(f"Invalid direction: {direction}. Must be one of {valid}")
-        self.d.swipe_ext(direction, scale=0.8, duration=duration)
-        time.sleep(0.5)
+        w, h = self.get_screen_size()
+        cx = w // 2
+        ms = int(duration * 1000) + 200
+        # Map direction to swipe coordinates (scroll content = opposite finger direction)
+        coords = {
+            "up":    (cx, int(h * 0.75), cx, int(h * 0.25)),   # finger up → scroll down
+            "down":  (cx, int(h * 0.25), cx, int(h * 0.75)),   # finger down → scroll up
+            "left":  (int(w * 0.75), h // 2, int(w * 0.25), h // 2),
+            "right": (int(w * 0.25), h // 2, int(w * 0.75), h // 2),
+        }
+        x1, y1, x2, y2 = coords[direction]
+        self.d.shell(f"input swipe {x1} {y1} {x2} {y2} {ms}")
+        time.sleep(0.6)
 
     def swipe_coords(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.3) -> None:
-        """Swipe from (x1,y1) to (x2,y2)."""
-        self.d.swipe(x1, y1, x2, y2, duration=duration)
+        """Swipe from (x1,y1) to (x2,y2) via adb shell input."""
+        ms = int(duration * 1000) + 200
+        self.d.shell(f"input swipe {x1} {y1} {x2} {y2} {ms}")
         time.sleep(0.5)
 
     def type_text(self, text: str) -> None:
