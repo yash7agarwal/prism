@@ -493,6 +493,19 @@ Every task must be evaluated for whether it can be delegated to a subagent. The 
 - Writing large blocks of code directly
 - Running tests and reading verbose output
 - Browsing the web and parsing results
+- **Reading files in main session before spawning an agent that will read the same files** — this is double-read waste
+- **Polling loops (`sleep + check`)** more than 2 turns — use `run_in_background=True`
+- **Reading log output > 2KB inline** — delegate to a log-analysis agent with a specific question
+- **Debugging via chunked file reads** — spawn a debug agent with the symptom instead
+
+### Mandatory Pre-Task Gate
+
+Before starting any task requiring 3+ file reads or implementation work, answer:
+1. Can an Explore agent summarize the relevant codebase in 300 words? → If yes, do that first.
+2. Will any command produce > 2KB? → If yes, delegate to an agent with a specific question.
+3. Is there a deployment/build to wait for? → Use `run_in_background=True`.
+
+Violation of these gates = context bandwidth waste. Run `/context-audit` after any session that violated them.
 
 ### Subagent prompt template
 

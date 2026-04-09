@@ -416,6 +416,103 @@ class Orchestrator:
             }
 
     # ------------------------------------------------------------------
+    # Figma-first UAT entry point
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def run_figma_uat(
+        cls,
+        figma_url: str,
+        apk_path: str,
+        accounts: list = None,
+        run_id: str = None,
+        notify=None,
+    ) -> dict:
+        """
+        Figma-first UAT entry point.
+
+        1. Parse Figma file to get journey spec
+        2. Install APK
+        3. Connect to device
+        4. Run FigmaUATRunner
+        5. Return FigmaUATReport
+
+        Args:
+            figma_url:  Full Figma file URL (figma.com/design/... or file/... or proto/...)
+            apk_path:   Path to the candidate APK to install
+            accounts:   Optional list of account dicts (unused by Figma UAT but kept for API parity)
+            run_id:     Optional run ID; auto-generated if not provided
+            notify:     Optional callable(str) for progress messages (e.g. bot send_message)
+
+        Returns:
+            FigmaUATReport dict (see FigmaUATRunner.run)
+        """
+        from agent.figma_journey_parser import FigmaJourneyParser  # noqa: PLC0415
+        from agent.figma_uat_runner import FigmaUATRunner          # noqa: PLC0415
+        from tools.apk_manager import install_apk                   # noqa: PLC0415
+
+        if run_id is None:
+            import uuid as _uuid  # noqa: PLC0415
+            run_id = f"figma_{_uuid.uuid4().hex[:8]}"
+
+        def _notify(msg: str) -> None:
+            if notify:
+                try:
+                    notify(msg)
+                except Exception as _e:
+                    logger.warning(f"[Orchestrator.run_figma_uat] notify() raised: {_e}")
+            logger.info(f"[Orchestrator.run_figma_uat] {msg}")
+
+        # Step 1 — Parse Figma
+        _notify("Parsing Figma file...")
+        file_id = FigmaJourneyParser.file_id_from_url(figma_url)
+        parser = FigmaJourneyParser(file_id=file_id)
+        journey_spec = parser.parse()
+
+        n_screens = journey_spec.get("total_screens", 0)
+        n_persuasion = len(journey_spec.get("persuasion_screens", []))
+        n_tc = len(journey_spec.get("test_cases", []))
+        _notify(
+            f"Parsed Figma: {n_screens} screens found "
+            f"({n_persuasion} persuasion elements), {n_tc} test cases generated. "
+            "Connecting to device..."
+        )
+
+        # Step 2 — Connect to device
+        device = AndroidDevice()
+
+        # Step 3 — Install APK
+        _notify(f"Installing APK: {Path(apk_path).name}")
+        package_name = install_apk(apk_path, serial=device.serial)
+        logger.info(f"[Orchestrator.run_figma_uat] Installed package: {package_name}")
+
+        # Launch the app before running
+        from tools.apk_manager import launch_app  # noqa: PLC0415
+        launch_app(package_name, serial=device.serial)
+        import time as _time  # noqa: PLC0415
+        _time.sleep(3)
+
+        _notify(
+            f"App launched. Running {n_tc} test cases against Figma design..."
+        )
+
+        # Step 4 — Run FigmaUATRunner
+        runner = FigmaUATRunner(
+            device=device,
+            journey_spec=journey_spec,
+            run_id=run_id,
+            package_name=package_name,
+        )
+        report = runner.run()
+
+        _notify(
+            f"Figma UAT complete: {report.get('overall_verdict')} — "
+            f"{round(report.get('compliance_rate', 0) * 100, 1)}% compliance"
+        )
+
+        return report
+
+    # ------------------------------------------------------------------
     # Cloud entry point
     # ------------------------------------------------------------------
 

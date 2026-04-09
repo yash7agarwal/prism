@@ -119,6 +119,13 @@ class RunTracker:
 _tracker = RunTracker()
 
 # ---------------------------------------------------------------------------
+# Figma UAT state — tracks chats awaiting a Figma URL after APK upload
+# ---------------------------------------------------------------------------
+
+# {chat_id: {"apk_path": str, "state": "waiting_figma_url"}}
+_pending_figma: dict[int, dict] = {}
+
+# ---------------------------------------------------------------------------
 # Background UAT runner
 # ---------------------------------------------------------------------------
 
@@ -206,13 +213,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "*MMT-OS UAT Bot*\n\n"
         "I run automated UAT on MakeMyTrip Android builds and report results.\n\n"
         "*Commands:*\n"
-        "/run `<feature>` — start a UAT run\n"
+        "/run `<feature>` — start a standard UAT run\n"
+        "/run_figma `<figma_url>` — start Figma-first UAT\n"
         "/status — show current run status\n"
         "/report — get the latest report\n"
         "/list — list recent runs\n"
         "/cases `<feature>` — list use cases for a feature\n"
         "/help — show this message\n\n"
-        "To upload an APK, simply send a `.apk` file as a document."
+        "To upload an APK, simply send a `.apk` file as a document.\n"
+        "After uploading an APK, send a Figma URL to run design compliance UAT."
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -465,6 +474,202 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as exc:
         logger.exception("[bot] APK download failed")
         await update.message.reply_text(f"Failed to save APK: {exc}")
+        return
+
+    # Offer Figma-first UAT mode
+    chat_id = update.effective_chat.id
+    _pending_figma[chat_id] = {
+        "apk_path": str(_CANDIDATE_APK),
+        "state": "waiting_figma_url",
+    }
+    await update.message.reply_text(
+        f"*APK saved!* To test against a Figma design:\n\n"
+        f"• Send me the Figma file URL (figma.com/...)\n"
+        f"• Or use /run `<feature>` for standard UAT",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Text message handler — Figma URL detection
+# ---------------------------------------------------------------------------
+
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Detect Figma URLs in plain text messages and trigger Figma UAT if pending."""
+    if not update.message or not update.message.text:
+        return
+
+    text = update.message.text.strip()
+    chat_id = update.effective_chat.id
+
+    # Check if this looks like a Figma URL
+    if "figma.com" not in text.lower():
+        return  # not a Figma URL — ignore (let other handlers deal with it)
+
+    pending = _pending_figma.get(chat_id)
+    if not pending or pending.get("state") != "waiting_figma_url":
+        await update.message.reply_text(
+            "Figma URL detected, but no APK is pending for this chat.\n"
+            "Please upload an APK first, then send the Figma URL.",
+        )
+        return
+
+    # Clear pending state and trigger Figma UAT
+    apk_path = pending["apk_path"]
+    del _pending_figma[chat_id]
+
+    await _start_figma_uat(
+        update=update,
+        context=context,
+        figma_url=text,
+        apk_path=apk_path,
+        chat_id=chat_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /run_figma command handler
+# ---------------------------------------------------------------------------
+
+
+async def cmd_run_figma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/run_figma <figma_url> — Run Figma-first UAT with the current candidate APK."""
+    chat_id = update.effective_chat.id
+
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /run_figma `<figma_url>`\n"
+            "Example: /run_figma https://www.figma.com/design/ABC123/MyApp",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    figma_url = context.args[0].strip()
+    if "figma.com" not in figma_url.lower():
+        await update.message.reply_text(
+            "That doesn't look like a valid Figma URL. "
+            "Expected: https://www.figma.com/design/<FILE_ID>/name"
+        )
+        return
+
+    if not _CANDIDATE_APK.exists():
+        await update.message.reply_text(
+            f"No candidate APK found at `{_CANDIDATE_APK}`.\n"
+            "Please upload a `.apk` file as a document first.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    # Clear any lingering pending state
+    _pending_figma.pop(chat_id, None)
+
+    await _start_figma_uat(
+        update=update,
+        context=context,
+        figma_url=figma_url,
+        apk_path=str(_CANDIDATE_APK),
+        chat_id=chat_id,
+    )
+
+
+async def _start_figma_uat(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    figma_url: str,
+    apk_path: str,
+    chat_id: int,
+) -> None:
+    """Shared helper: validate URL, show confirmation, then kick off background run."""
+    if _tracker.is_running():
+        await update.message.reply_text(
+            "A UAT run is already in progress. Use /status to check it."
+        )
+        return
+
+    run_id = f"figma_{uuid.uuid4().hex[:8]}"
+    _tracker.start(run_id, chat_id)
+
+    await update.message.reply_text(
+        f"*Starting Figma UAT*\n"
+        f"Run ID: `{run_id}`\n"
+        f"Figma URL: {figma_url}\n\n"
+        "Parsing Figma file... I'll update you with progress.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    thread = threading.Thread(
+        target=_run_figma_uat_in_background,
+        args=(run_id, figma_url, apk_path, chat_id, context.application),
+        daemon=True,
+        name=f"figma-uat-{run_id}",
+    )
+    thread.start()
+
+
+# ---------------------------------------------------------------------------
+# Background Figma UAT runner
+# ---------------------------------------------------------------------------
+
+
+def _run_figma_uat_in_background(
+    run_id: str,
+    figma_url: str,
+    apk_path: str,
+    chat_id: int,
+    app,
+) -> None:
+    """Execute Figma-first UAT in a worker thread and notify when done."""
+    import asyncio  # noqa: PLC0415
+
+    async def _send(text: str) -> None:
+        await app.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    def _notify(text: str) -> None:
+        asyncio.run_coroutine_threadsafe(_send(text), app.loop)
+
+    try:
+        from agent.orchestrator import Orchestrator  # noqa: PLC0415
+
+        result = Orchestrator.run_figma_uat(
+            figma_url=figma_url,
+            apk_path=apk_path,
+            accounts=[],
+            run_id=run_id,
+            notify=_notify,
+        )
+        _tracker.complete(run_id, result)
+
+        compliance_pct = round(result.get("compliance_rate", 0) * 100, 1)
+        verdict = result.get("overall_verdict", "UNKNOWN")
+        tested = result.get("tested_screens", 0)
+        compliant = result.get("compliant", 0)
+        report_path = result.get("report_path", "")
+
+        msg = (
+            f"*Figma UAT Complete*\n"
+            f"Run ID: `{run_id}`\n"
+            f"Verdict: *{verdict}*\n"
+            f"Compliance: {compliance_pct}% ({compliant}/{tested} screens)\n"
+        )
+        if report_path:
+            msg += f"Report: `{Path(report_path).name}`\n"
+        msg += "\nUse /report to fetch the full report."
+
+    except Exception as exc:
+        _tracker.fail(run_id, str(exc))
+        msg = (
+            f"*Figma UAT Failed*\n"
+            f"Run ID: `{run_id}`\n"
+            f"Error: {exc}"
+        )
+        logger.exception(f"[bot] Figma UAT run {run_id} raised an exception")
+
+    _notify(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -487,11 +692,14 @@ def main() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("run", cmd_run))
+    app.add_handler(CommandHandler("run_figma", cmd_run_figma))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("cases", cmd_cases))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    # Must be registered AFTER document handler so APK uploads are handled first
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
     logger.info("[bot] Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
