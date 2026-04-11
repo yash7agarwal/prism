@@ -102,7 +102,7 @@ class FigmaJourneyParser:
     # Main parse entry point
     # ------------------------------------------------------------------
 
-    def parse(self) -> dict:
+    def parse(self, enrich: bool = True) -> dict:
         """
         Full parse of Figma file. Returns a JourneySpec dict.
 
@@ -194,8 +194,9 @@ class FigmaJourneyParser:
             for screen in all_screens:
                 screen["image_url"] = image_urls.get(screen["node_id"], "")
 
-        # Step 6 — Claude intelligence enrichment
-        if all_screens:
+        # Step 6 — Claude intelligence enrichment (skip when caller passes enrich=False
+        # to save LLM quota when only frame metadata + image URLs are needed)
+        if all_screens and enrich:
             all_screens = self._generate_screen_intelligence(all_screens)
             # Propagate enriched screens back into pages
             screen_index = {s["node_id"]: s for s in all_screens}
@@ -601,7 +602,12 @@ class FigmaJourneyParser:
         """Fetch the full Figma file document. Raises on error."""
         url = f"{_FIGMA_API_BASE}/files/{self.file_id}"
         headers = {"X-Figma-Token": self.token}
-        params = {"depth": "4"}  # depth=4 covers most screen structures without exploding
+        # depth=2 keeps API cost ~4x lower than depth=4. Figma free tier charges by
+        # "compute cost" per request (not request count), so deep queries burn the
+        # monthly quota fast. We get page → frame metadata at depth=2, which is
+        # enough for screen-level mapping. Use depth=3 only if you need per-element
+        # text content for the enrichment pass.
+        params = {"depth": "2"}
 
         try:
             resp = _requests.get(url, headers=headers, params=params, timeout=60)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from webapp.api.db import Base
@@ -77,6 +77,8 @@ class TestPlan(Base):
     feature_description: Mapped[str] = mapped_column(Text, nullable=False)
     voice_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | approved
+    # plan_type: feature_flow | design_fidelity | functional_flow | deeplink_utility | edge_cases
+    plan_type: Mapped[str] = mapped_column(String(50), default="feature_flow")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     project: Mapped[Project] = relationship(back_populates="plans")
@@ -100,3 +102,61 @@ class TestCase(Base):
     status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | approved | removed
 
     plan: Mapped[TestPlan] = relationship(back_populates="cases")
+
+
+# ---------------------------------------------------------------------------
+# UAT Run + per-frame comparison results
+# ---------------------------------------------------------------------------
+
+
+class UatRun(Base):
+    """One end-to-end APK-driven UAT execution.
+
+    Persists the full outcome of: install APK → navigate app via VisionNavigator →
+    compare each Figma frame to the matching app screen → produce a report.
+    """
+    __tablename__ = "uat_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    apk_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    apk_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    package_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    figma_file_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    feature_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # pending | running | completed | failed
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    total_frames: Mapped[int] = mapped_column(Integer, default=0)
+    matched: Mapped[int] = mapped_column(Integer, default=0)
+    mismatched: Mapped[int] = mapped_column(Integer, default=0)
+    unreachable: Mapped[int] = mapped_column(Integer, default=0)
+    overall_match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    report_md_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    frame_results: Mapped[list["UatFrameResult"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="UatFrameResult.id"
+    )
+
+
+class UatFrameResult(Base):
+    """One row per (Figma frame, app screen) comparison within a UatRun."""
+    __tablename__ = "uat_frame_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("uat_runs.id", ondelete="CASCADE"))
+    figma_frame_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    figma_node_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    figma_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    app_screenshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    diff_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # MATCHES | DIFFERS | UNREACHABLE | ERROR
+    verdict: Mapped[str] = mapped_column(String(20), default="ERROR")
+    issues: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    navigation_steps: Mapped[int] = mapped_column(Integer, default=0)
+    elapsed_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    run: Mapped[UatRun] = relationship(back_populates="frame_results")

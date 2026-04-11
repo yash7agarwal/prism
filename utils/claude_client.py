@@ -14,6 +14,11 @@ FAST_MODEL = "claude-haiku-4-5-20251001"
 _client: anthropic.Anthropic | None = None
 
 
+def _provider() -> str:
+    """Read LLM_PROVIDER env var. Defaults to 'claude'. Set to 'gemini' to use Google Gemini."""
+    return os.environ.get("LLM_PROVIDER", "claude").lower()
+
+
 def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
@@ -28,7 +33,13 @@ def ask(
     system: str = "",
     retries: int = 3,
 ) -> str:
-    """Call Claude and return the text response. Retries on transient errors."""
+    """Call the configured LLM provider and return the text response. Retries on transient errors."""
+    if _provider() == "gemini":
+        from utils import gemini_client
+        return gemini_client.ask(
+            prompt=prompt, max_tokens=max_tokens, model=model, system=system, retries=retries
+        )
+
     messages = [{"role": "user", "content": prompt}]
     kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
     if system:
@@ -49,7 +60,7 @@ def ask(
 
 
 def ask_fast(prompt: str, max_tokens: int = 512) -> str:
-    """Use the fast/cheap model for low-stakes tasks."""
+    """Use the fast/cheap model for low-stakes tasks. Routes via ask() so provider switch applies."""
     return ask(prompt, max_tokens=max_tokens, model=FAST_MODEL)
 
 
@@ -62,11 +73,24 @@ def ask_vision(
     system: str = "",
     retries: int = 3,
 ) -> str:
-    """Send an image + text prompt to Claude vision. Returns text response.
+    """Send an image + text prompt to the configured vision provider. Returns text response.
 
-    Uses FAST_MODEL (Haiku) by default for speed in navigation loops.
+    Uses FAST_MODEL by default for speed in navigation loops.
     Pass model=DEFAULT_MODEL for higher-accuracy verification calls.
+    Routes to Gemini if LLM_PROVIDER=gemini in .env.
     """
+    if _provider() == "gemini":
+        from utils import gemini_client
+        return gemini_client.ask_vision(
+            prompt=prompt,
+            image_bytes=image_bytes,
+            media_type=media_type,
+            max_tokens=max_tokens,
+            model=model,
+            system=system,
+            retries=retries,
+        )
+
     import base64
 
     img_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")

@@ -70,7 +70,7 @@ def analyze_screen(image_bytes: bytes) -> dict:
             image_bytes=image_bytes,
             media_type=media_type,
             model=FAST_MODEL,
-            max_tokens=1500,
+            max_tokens=4096,
         )
         return _parse_json(raw)
     except Exception as exc:

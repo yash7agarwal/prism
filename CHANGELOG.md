@@ -2,6 +2,40 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-04-11
+### Added
+- `webapp/api/services/uat_runner.py` — APK-driven E2E execution engine: installs candidate APK, parses Figma file (cached), launches app, drives VisionNavigator through each substantive Figma frame, screenshots, compares via FigmaComparator, persists `UatRun` + `UatFrameResult` rows, writes markdown report
+- `webapp/api/routes/uat_runs.py` — 10 endpoints: start/list/get/delete runs, download report.md, serve figma/app/diff images
+- `webapp/api/models.py` — `UatRun` and `UatFrameResult` tables with 17 + 11 columns
+- `webapp/api/services/graph_analyzer.py` — pure-Python utilities: `find_orphan_screens`, `find_dead_end_screens`, `find_dangling_hints`, `find_unreachable_screens`, `reachability_from`
+- `webapp/api/services/functional_flow_planner.py` — per-element click verification plan (deterministic, zero LLM calls)
+- `webapp/api/services/deeplink_utility_planner.py` — graph integrity cases (orphans, dead-ends, dangling references, unreachable screens — deterministic)
+- `webapp/api/services/edge_cases_planner.py` — empty/error/slow network/long content/missing fields (1 batched LLM call)
+- `webapp/api/services/figma_test_planner.py` — per-frame design-fidelity test cases via vision LLM comparison of composite (Figma+app) images; reuses cached Figma images
+- `utils/gemini_client.py` — drop-in Gemini provider with `ask`, `ask_fast`, `ask_vision`; switch via `LLM_PROVIDER=gemini` env var; uses `gemini-flash-latest` (free tier)
+- `webapp/web/components/PlanTypeBadge.tsx` — colored badge per plan type (design_fidelity / functional_flow / deeplink_utility / edge_cases / feature_flow)
+- `webapp/web/components/FrameComparisonCard.tsx` — per-frame Figma/app/diff side-by-side card with issues list
+- `webapp/web/app/projects/[id]/runs/` — 3 new pages: run list, new run form, run detail (auto-polls every 3s, shows overall match score + per-frame comparison cards + downloadable report.md)
+- `telegram_bot/bot.py` — `/uatsuite` command to generate the full multi-planner suite from mobile
+
+### Changed
+- `webapp/api/routes/plans.py` — planner registry pattern dispatches by `plan_type`; new `POST /projects/{id}/plans/suite` endpoint runs all applicable planners; plan case persistence now dedups by normalized `(title, target_screen)`; throttle between planners reduced 8s → 2s (suite time: 45s → 22s); `DELETE /projects/{id}/plans?status=draft` bulk delete for noise cleanup
+- `agent/figma_journey_parser.py` — `parse(enrich=False)` flag skips the internal Claude enrichment call; `depth=4` → `depth=2` in `/v1/files` request (~4x cheaper, stretches Figma's monthly compute quota)
+- `agent/figma_comparator.py` — `compare_screenshot_to_frame` accepts new `figma_image_path` kwarg to reuse pre-fetched Figma images instead of re-hitting `/v1/images`
+- `utils/claude_client.py` — `ask`/`ask_fast`/`ask_vision` route to Gemini when `LLM_PROVIDER=gemini` is set in env (transparent provider switch)
+- `webapp/api/services/screen_analyzer.py` — `_sniff_media_type` detects PNG/JPEG/GIF/WEBP from magic bytes so Telegram JPEG uploads work; `max_tokens` bumped 1500 → 4096 to avoid truncated JSON on dense screens
+- `webapp/api/models.py` — `TestPlan.plan_type` column added; `Screen.context_hints` column added (backward-compatible via lightweight `ALTER TABLE` migration in `init_db()`)
+- `webapp/api/main.py` — mounts `uat_runs` router (36 → 38 routes)
+- `webapp/web/lib/api.ts` — `AbortController`-based per-request timeout (300s for `/suite`, 600s for `/uat/runs`) — prevents browser fetch from cancelling long-running operations
+- `webapp/web/lib/types.ts` — `PlanType` union, `UatRun`/`UatRunSummary`/`UatFrameResult`/`UatVerdict`/`UatRunStatus` interfaces
+- `webapp/web/app/projects/[id]/page.tsx` — prominent "▶ UAT Runs" section at top with Start button, de-emphasized screenshot upload + plan generation as secondary
+- `webapp/web/app/projects/[id]/plans/[planId]/page.tsx` — shows `PlanTypeBadge` in header
+
+### Fixed
+- Figma API monthly quota exhaustion: added on-disk `_cached_figma_parse` helper (1h TTL) in `uat_runner.py` that survives restarts and falls back to stale cache on 429; per-frame image cache at `webapp/data/figma_cache/` shared across runs
+- Gemini `gemini-2.0-flash` free tier quota is 0/day → switched default model to `gemini-flash-latest`
+- Suite endpoint 500 errors: reduced browser-side fetch cancellations with explicit `AbortController` timeout + backend throttle cut
+
 ## [0.5.0] — 2026-04-11
 ### Added
 - `tools/vision_navigator.py` — generic vision-guided navigation engine. Screenshot → Claude Haiku vision (normalized 0-1 coords) → ADB tap → repeat. Replaces brittle deterministic `wait_for_text` flows. Handles modals, splash screens, dynamic layouts. Includes `relaunch_app` recovery action and wrong-screen detection.

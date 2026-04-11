@@ -51,6 +51,13 @@ def init_db() -> None:
         with engine.begin() as conn:
             if "context_hints" not in existing_cols:
                 conn.execute(text("ALTER TABLE screens ADD COLUMN context_hints TEXT"))
+    if "test_plans" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("test_plans")}
+        with engine.begin() as conn:
+            if "plan_type" not in existing_cols:
+                conn.execute(text(
+                    "ALTER TABLE test_plans ADD COLUMN plan_type VARCHAR(50) DEFAULT 'feature_flow'"
+                ))
 
 
 SCREENSHOTS_DIR = _DATA_DIR / "screenshots"

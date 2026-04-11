@@ -727,6 +727,89 @@ async def cmd_appuat_uat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
+async def cmd_appuat_uat_suite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate a comprehensive UAT suite (all plan types) for the active project.
+
+    Usage:
+        /uatsuite <feature description>
+        /uatsuite <feature description> figma=<file_id>
+    """
+    chat_id = update.effective_chat.id
+    project_id = _get_active_project(chat_id)
+    if project_id is None:
+        await update.message.reply_text(
+            "No active project. Use /projects and /setproject `<id>`.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: `/uatsuite <feature description>`\n\n"
+            "Optional: append `figma=<file_id>` to include design-fidelity plan.\n\n"
+            "Example:\n"
+            "`/uatsuite hotel details page with new design figma=rid4WC0zcs0yt3RjpST0dx`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    # Parse optional figma=<id> suffix
+    figma_file_id: str | None = None
+    parts = list(context.args)
+    for p in list(parts):
+        if p.startswith("figma="):
+            figma_file_id = p.split("=", 1)[1]
+            parts.remove(p)
+    feature_description = " ".join(parts).strip()
+    if not feature_description:
+        await update.message.reply_text("Please provide a feature description.")
+        return
+
+    figma_hint = f" with Figma {figma_file_id}" if figma_file_id else ""
+    await update.message.reply_text(
+        f"Generating UAT suite{figma_hint} for:\n_{feature_description}_\n\n"
+        f"This runs 3-4 specialized planners (functional flow, deeplink integrity, edge cases"
+        f"{', design fidelity' if figma_file_id else ''}). Thinking…",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=600) as client:
+            body: dict = {"feature_description": feature_description}
+            if figma_file_id:
+                body["figma_file_id"] = figma_file_id
+            r = await client.post(
+                f"{_APPUAT_API}/api/projects/{project_id}/plans/suite",
+                json=body,
+            )
+            if r.status_code == 400:
+                await update.message.reply_text("No screens uploaded for this project yet. Send screenshots first.")
+                return
+            r.raise_for_status()
+            plans = r.json()
+    except Exception as exc:
+        await update.message.reply_text(f"Suite generation failed: {exc}")
+        return
+
+    if not plans:
+        await update.message.reply_text("Suite ran but no plans were generated. Check backend logs.")
+        return
+
+    total_cases = sum(len(p.get("cases") or []) for p in plans)
+    lines = [
+        f"*UAT Suite* — {len(plans)} plans, {total_cases} cases total",
+        "",
+    ]
+    for p in plans:
+        n = len(p.get("cases") or [])
+        lines.append(f"• *Plan #{p['id']}* — `{p['plan_type']}` ({n} cases)")
+        lines.append(f"  http://localhost:3000/projects/{project_id}/plans/{p['id']}")
+    lines.append("")
+    lines.append(f"Review all: http://localhost:3000/projects/{project_id}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Receive a photo from Telegram and upload it to the active AppUAT project."""
     if not update.message or not update.message.photo:
@@ -1056,6 +1139,7 @@ def main() -> None:
     app.add_handler(CommandHandler("projects", cmd_appuat_projects))
     app.add_handler(CommandHandler("setproject", cmd_appuat_setproject))
     app.add_handler(CommandHandler("uat", cmd_appuat_uat))
+    app.add_handler(CommandHandler("uatsuite", cmd_appuat_uat_suite))
     # Photo handler — uploads to active AppUAT project
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))

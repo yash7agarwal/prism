@@ -78,12 +78,77 @@ export interface TestCase {
   status: 'proposed' | 'approved' | 'removed'
 }
 
+export type PlanType =
+  | 'feature_flow'
+  | 'design_fidelity'
+  | 'functional_flow'
+  | 'deeplink_utility'
+  | 'edge_cases'
+
 export interface TestPlan {
   id: number
   project_id: number
   feature_description: string
   voice_transcript: string | null
   status: 'draft' | 'approved'
+  plan_type: PlanType
   created_at: string
   cases: TestCase[]
+}
+
+// ---------- UAT runs ----------
+
+export type UatVerdict = 'MATCHES' | 'DIFFERS' | 'UNREACHABLE' | 'ERROR'
+export type UatRunStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface UatFrameResult {
+  id: number
+  run_id: number
+  figma_frame_name: string
+  figma_node_id: string
+  figma_image_path: string | null
+  app_screenshot_path: string | null
+  diff_image_path: string | null
+  match_score: number | null
+  verdict: UatVerdict
+  issues: string[] | null
+  navigation_steps: number
+  elapsed_s: number | null
+}
+
+export interface UatRun {
+  id: number
+  project_id: number
+  apk_path: string | null
+  apk_version: string | null
+  package_name: string | null
+  figma_file_id: string | null
+  feature_description: string | null
+  status: UatRunStatus
+  total_frames: number
+  matched: number
+  mismatched: number
+  unreachable: number
+  overall_match_score: number | null
+  report_md_path: string | null
+  error: string | null
+  started_at: string
+  completed_at: string | null
+  frame_results: UatFrameResult[]
+}
+
+export interface UatRunSummary {
+  id: number
+  project_id: number
+  apk_version: string | null
+  figma_file_id: string | null
+  feature_description: string | null
+  status: UatRunStatus
+  total_frames: number
+  matched: number
+  mismatched: number
+  unreachable: number
+  overall_match_score: number | null
+  started_at: string
+  completed_at: string | null
 }

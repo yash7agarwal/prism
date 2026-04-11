@@ -185,6 +185,7 @@ class FigmaComparator:
         screenshot_path: str,
         figma_node_id: str,
         screen_name: str,
+        figma_image_path: Optional[str] = None,
     ) -> dict:
         """
         Compare a real screenshot to a Figma frame.
@@ -192,6 +193,12 @@ class FigmaComparator:
         Uses Claude vision to identify differences (both images as base64 content
         blocks).  Falls back to pixel diff if Claude is unavailable or the
         Figma frame cannot be fetched.
+
+        Args:
+            figma_image_path: Optional path to a pre-fetched Figma frame image.
+                If provided, SKIPS the Figma API call entirely — useful when the
+                caller has already cached the image, which avoids burning Figma's
+                monthly compute quota on repeated runs.
 
         Returns:
             {
@@ -217,8 +224,21 @@ class FigmaComparator:
             base_result["issues"].append(f"Screenshot not found: {screenshot_path}")
             return base_result
 
-        # 2. Fetch Figma frame
-        figma_bytes = self.fetch_frame_image(figma_node_id)
+        # 2. Get Figma frame bytes — prefer pre-fetched local copy to save quota
+        figma_bytes: Optional[bytes] = None
+        if figma_image_path and os.path.exists(figma_image_path):
+            try:
+                with open(figma_image_path, "rb") as fh:
+                    figma_bytes = fh.read()
+                logger.debug(
+                    f"[FigmaComparator] Using pre-fetched Figma image for {figma_node_id}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[FigmaComparator] Could not read pre-fetched image: {exc}"
+                )
+        if not figma_bytes:
+            figma_bytes = self.fetch_frame_image(figma_node_id)
         if not figma_bytes:
             base_result["issues"].append(
                 f"Could not fetch Figma frame for node {figma_node_id}"

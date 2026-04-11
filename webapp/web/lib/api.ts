@@ -10,23 +10,42 @@ import type {
   Screen,
   TestCase,
   TestPlan,
+  UatRun,
+  UatRunSummary,
 } from './types'
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-    cache: 'no-store',
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`API ${res.status}: ${text}`)
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  // Allow callers to override the default fetch timeout — needed for long-running
+  // endpoints like POST /plans/suite which can take 60-90 seconds. Browsers
+  // otherwise silently kill the request well before the server finishes.
+  const timeoutMs = init?.timeoutMs ?? 30_000
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const res = await fetch(path, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`API ${res.status}: ${text}`)
+    }
+    if (res.status === 204) return undefined as T
+    return res.json() as Promise<T>
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs / 1000}s: ${path}`)
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
   }
-  if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
 }
 
 export const api = {
@@ -84,10 +103,26 @@ export const api = {
   listPlans: (projectId: number) =>
     request<TestPlan[]>(`/api/projects/${projectId}/plans`),
 
-  createPlan: (projectId: number, feature_description: string) =>
+  createPlan: (
+    projectId: number,
+    feature_description: string,
+    opts?: { plan_type?: string; figma_file_id?: string }
+  ) =>
     request<TestPlan>(`/api/projects/${projectId}/plans`, {
       method: 'POST',
-      body: JSON.stringify({ feature_description }),
+      body: JSON.stringify({ feature_description, ...(opts || {}) }),
+      timeoutMs: 180_000, // single plan can take up to 60s (Figma + Gemini)
+    }),
+
+  createPlanSuite: (
+    projectId: number,
+    feature_description: string,
+    figma_file_id?: string
+  ) =>
+    request<TestPlan[]>(`/api/projects/${projectId}/plans/suite`, {
+      method: 'POST',
+      body: JSON.stringify({ feature_description, figma_file_id }),
+      timeoutMs: 300_000, // suite runs 4 planners sequentially + throttle, can take 60-90s
     }),
 
   getPlan: (planId: number) =>
@@ -105,4 +140,40 @@ export const api = {
 
   deleteCase: (caseId: number) =>
     request<void>(`/api/cases/${caseId}`, { method: 'DELETE' }),
+
+  // ---------- UAT runs ----------
+
+  listUatRuns: (projectId: number) =>
+    request<UatRunSummary[]>(`/api/projects/${projectId}/uat/runs`),
+
+  getUatRun: (runId: number) =>
+    request<UatRun>(`/api/uat/runs/${runId}`),
+
+  createUatRun: (
+    projectId: number,
+    data: {
+      apk_path?: string | null
+      figma_file_id: string
+      feature_description?: string | null
+      skip_install?: boolean
+    }
+  ) =>
+    request<UatRun>(`/api/projects/${projectId}/uat/runs`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeoutMs: 600_000, // runs can take 60-300s depending on frame count + device speed
+    }),
+
+  deleteUatRun: (runId: number) =>
+    request<void>(`/api/uat/runs/${runId}`, { method: 'DELETE' }),
+
+  // Image URLs (not JSON — used as <img src=...>)
+  uatFigmaImageUrl: (runId: number, frameId: number) =>
+    `/api/uat/runs/${runId}/frames/${frameId}/figma_image`,
+  uatAppScreenshotUrl: (runId: number, frameId: number) =>
+    `/api/uat/runs/${runId}/frames/${frameId}/app_screenshot`,
+  uatDiffImageUrl: (runId: number, frameId: number) =>
+    `/api/uat/runs/${runId}/frames/${frameId}/diff_image`,
+  uatReportMdUrl: (runId: number) =>
+    `/api/uat/runs/${runId}/report.md`,
 }

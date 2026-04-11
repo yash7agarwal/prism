@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/api'
 import type { Screen, TestCase, TestPlan } from '@/lib/types'
 import { TestCaseCard } from '@/components/TestCaseCard'
+import { PlanTypeBadge } from '@/components/PlanTypeBadge'
 
 export default function PlanReviewPage({
   params,
@@ -97,8 +98,9 @@ export default function PlanReviewPage({
 
       <div className="flex items-start justify-between mb-6 gap-6">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
+          <div className="flex items-center gap-3 mb-1 flex-wrap">
             <h1 className="text-2xl font-bold">Test Plan #{plan.id}</h1>
+            <PlanTypeBadge type={plan.plan_type} size="md" />
             <span
               className={`text-xs px-2 py-0.5 rounded ${
                 plan.status === 'approved'

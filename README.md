@@ -1,8 +1,8 @@
-# MMT-OS · v0.5.0
+# MMT-OS · v0.6.0
 
-> AI-native Android UAT operating system — vision-guided navigation, generic web app for any PM, Telegram-first capture, self-healing execution.
+> APK-driven UAT operating system — drop in a build, compare it to your Figma spec, get a per-frame report. Vision-guided navigation, multi-planner test suite, Telegram-first capture, self-healing execution.
 
-MMT-OS started as a MakeMyTrip-specific UAT agent and has grown into a generic platform for **mapping any mobile app and generating UAT plans**. Take screenshots on your phone, send them to a Telegram bot, get a fully analyzed app graph with Claude-proposed navigation flow, and ask the system to generate a test plan from a feature description — all reviewed in a web UI before execution.
+MMT-OS started as a MakeMyTrip-specific UAT agent and has grown into a generic platform for **running UAT against any Android app**. Drop in a candidate APK, point it at your Figma file, and the system installs the build, autonomously drives the app through every substantive Figma frame using Claude/Gemini vision, compares each app screen to the design, and produces a comparison report with per-frame diff images — no manual tapping required.
 
 ---
 
@@ -171,6 +171,8 @@ adb devices
 
 ## Changelog
 
+**v0.6.0 (2026-04-11)** — APK-driven UAT runs with per-frame comparison reports, multi-planner suite (design_fidelity / functional_flow / deeplink_utility / edge_cases), Figma cache layer, Gemini provider swap, plan dedup + bulk delete.
+
 **v0.5.0 (2026-04-11)** — Vision-guided navigation, generic AppUAT web app, Telegram screenshot upload + `/uat` command, auto flow inference, test plan generator, JPEG/PNG sniffer.
 
 **v0.4.0 (2026-04-09)** — Figma-first UAT mode, Figma journey parser, context efficiency module with delegation patterns.
@@ -178,8 +180,6 @@ adb devices
 **v0.3.0 (2026-04-09)** — Self-healing engine, Telegram bot, cloud-ready emulator manager, use case registry, Figma comparator, Railway deploy.
 
 **v0.2.0 (2026-04-09)** — Autonomous UAT runner with screen verification.
-
-**v0.1.0** — Initial multi-agent UAT system.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

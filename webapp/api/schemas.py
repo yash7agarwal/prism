@@ -108,6 +108,15 @@ class FlowInferenceResult(BaseModel):
 class TestPlanCreate(BaseModel):
     feature_description: str
     voice_transcript: str | None = None
+    figma_file_id: str | None = None  # if set, generate design-fidelity cases
+    plan_type: str | None = None  # feature_flow | design_fidelity | functional_flow | deeplink_utility | edge_cases
+
+
+class SuiteCreate(BaseModel):
+    """Request body for POST /api/projects/{id}/plans/suite — generates ALL plan types."""
+    feature_description: str
+    figma_file_id: str | None = None
+    voice_transcript: str | None = None
 
 
 class TestCaseOut(BaseModel):
@@ -136,5 +145,72 @@ class TestPlanOut(BaseModel):
     feature_description: str
     voice_transcript: str | None
     status: str
+    plan_type: str = "feature_flow"
     created_at: datetime
     cases: list[TestCaseOut] = []
+
+
+# ---------- UAT Run ----------
+
+class UatRunCreate(BaseModel):
+    """Request body for POST /api/projects/{id}/uat/runs"""
+    apk_path: str | None = None  # optional — skip install if None
+    figma_file_id: str
+    feature_description: str | None = None
+    skip_install: bool = False
+
+
+class UatFrameResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    run_id: int
+    figma_frame_name: str
+    figma_node_id: str
+    figma_image_path: str | None
+    app_screenshot_path: str | None
+    diff_image_path: str | None
+    match_score: float | None
+    verdict: str
+    issues: list[Any] | None
+    navigation_steps: int
+    elapsed_s: float | None
+
+
+class UatRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+    apk_path: str | None
+    apk_version: str | None
+    package_name: str | None
+    figma_file_id: str | None
+    feature_description: str | None
+    status: str
+    total_frames: int
+    matched: int
+    mismatched: int
+    unreachable: int
+    overall_match_score: float | None
+    report_md_path: str | None
+    error: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    frame_results: list[UatFrameResultOut] = []
+
+
+class UatRunSummary(BaseModel):
+    """Lightweight list-view summary — omits frame_results to keep the list endpoint fast."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+    apk_version: str | None
+    figma_file_id: str | None
+    feature_description: str | None
+    status: str
+    total_frames: int
+    matched: int
+    mismatched: int
+    unreachable: int
+    overall_match_score: float | None
+    started_at: datetime
+    completed_at: datetime | None
