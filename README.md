@@ -1,4 +1,4 @@
-# MMT-OS · v0.7.0
+# MMT-OS · v0.7.1
 
 > APK-driven UAT operating system — drop in a build, compare it to your Figma spec, get a per-frame report. Vision-guided navigation, multi-planner test suite, Telegram-first capture, self-healing execution.
 

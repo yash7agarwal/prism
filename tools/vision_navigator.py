@@ -85,7 +85,7 @@ class VisionNavigator:
         self,
         device: AndroidDevice,
         max_steps: int = 10,
-        step_wait_s: float = 1.5,
+        step_wait_s: float = 2.5,
         evidence_dir: str = ".tmp/evidence/vision_nav",
         package_name: str | None = None,
     ):
@@ -144,7 +144,7 @@ class VisionNavigator:
                     image_bytes=sc_bytes,
                     system=self._system_prompt,
                     model=FAST_MODEL,
-                    max_tokens=256,
+                    max_tokens=1024,
                 )
             except Exception as exc:
                 logger.error(f"[VisionNav] Vision API call failed: {exc}")
@@ -161,7 +161,13 @@ class VisionNavigator:
                 action = self._parse_response(raw)
             except Exception as exc:
                 logger.warning(f"[VisionNav] Failed to parse response: {raw[:200]}")
-                # Non-fatal — skip this step and retry
+                # Recovery: press back to escape from any stuck state, then continue.
+                # Without this, the device stays where it is and we keep asking the
+                # same question over and over on the same screen.
+                try:
+                    self.device.press_back()
+                except Exception:
+                    pass
                 time.sleep(self.step_wait_s)
                 continue
 

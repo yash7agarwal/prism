@@ -2,6 +2,12 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-04-12
+### Fixed
+- `tools/vision_navigator.py`: bumped `max_tokens` 256 → 1024 — fixes Gemini returning truncated JSON that caused every navigation step to fail with parse errors
+- `tools/vision_navigator.py`: on JSON parse failure, now calls `device.press_back()` before retrying — recovers from stuck app states instead of repeating the same failing step
+- `tools/vision_navigator.py`: increased `step_wait_s` default 1.5 → 2.5 — reduces Gemini free-tier RPM violations during navigation loops
+
 ## [0.7.0] — 2026-04-12
 ### Added
 - `webapp/api/services/figma_importer.py` — proactive Figma importer that does ONE full fetch of a Figma file (structure + all frame images) and persists everything locally; subsequent UAT runs source data from DB + disk with zero Figma API calls
