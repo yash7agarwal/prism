@@ -105,7 +105,7 @@ memory/                         # Compounding intelligence logs
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/yash7agarwal/MMT-OS.git prism
+git clone https://github.com/yash7agarwal/prism.git
 cd prism
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
