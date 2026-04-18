@@ -2,6 +2,15 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] — 2026-04-18
+### Changed
+- Aligned entire frontend to DESIGN.md design system — removed all forbidden patterns
+- Replaced all violet/indigo/purple accents with emerald/cyan/sky (9 files fixed)
+- Removed box-shadow glows, replaced with border-color transitions
+- Reduced oversized typography (text-5xl → text-2xl on match scores)
+- Changed 3-column equal grids to 2-column asymmetric where applicable
+- Updated prism logo SVG spectrum to use design-compliant colors (no violet)
+
 ## [0.9.1] — 2026-04-18
 ### Added
 - `utils/groq_client.py` — free Llama 3.3 70B synthesis via Groq (14,400 RPD, zero cost)

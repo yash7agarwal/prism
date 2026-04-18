@@ -63,7 +63,7 @@ function Tooltip({ text }: { text: string }) {
         <Info size={12} />
       </button>
       {show && (
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg p-2.5 shadow-lg z-50 leading-relaxed">
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg p-2.5 z-50 leading-relaxed">
           {text}
         </span>
       )}

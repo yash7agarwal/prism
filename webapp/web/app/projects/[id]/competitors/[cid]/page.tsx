@@ -294,14 +294,14 @@ export default function CompetitorDetailPage({ params }: { params: { id: string;
       {/* Full Report (if exists) */}
       {artifacts.length > 0 && (
         <div className="mb-8">
-          <h3 className="text-xs font-medium text-violet-400 uppercase tracking-wider mb-3">
+          <h3 className="text-xs font-medium text-emerald-400 uppercase tracking-wider mb-3">
             Full Report ({artifacts.length})
           </h3>
           {artifacts.map(art => (
-            <div key={art.id} className="border border-violet-500/20 bg-violet-500/5 rounded-xl overflow-hidden">
+            <div key={art.id} className="border border-emerald-500/20 bg-emerald-500/5 rounded-xl overflow-hidden">
               <button
                 onClick={() => setShowReport(showReport === art.id ? null : art.id)}
-                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-violet-500/10 transition-colors"
+                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-emerald-500/10 transition-colors"
               >
                 <div>
                   <h4 className="text-sm font-medium text-zinc-200">{art.title}</h4>
@@ -309,10 +309,10 @@ export default function CompetitorDetailPage({ params }: { params: { id: string;
                     Generated {new Date(art.generated_at).toLocaleDateString()} by {art.generated_by_agent || 'agent'}
                   </p>
                 </div>
-                <span className="text-xs text-violet-400">{showReport === art.id ? 'Collapse' : 'Read report'}</span>
+                <span className="text-xs text-emerald-400">{showReport === art.id ? 'Collapse' : 'Read report'}</span>
               </button>
               {showReport === art.id && (
-                <div className="px-4 pb-4 border-t border-violet-500/10">
+                <div className="px-4 pb-4 border-t border-emerald-500/10">
                   <div className="mt-3">
                     <RenderContent text={art.content_md} />
                   </div>

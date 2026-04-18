@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <line x1="68" y1="52" x2="95" y2="47" stroke="#f97316" strokeWidth="1.5" opacity="0.7" />
                 <line x1="68" y1="54" x2="95" y2="56" stroke="#22c55e" strokeWidth="1.5" opacity="0.7" />
                 <line x1="68" y1="56" x2="95" y2="65" stroke="#06b6d4" strokeWidth="1.5" opacity="0.7" />
-                <line x1="68" y1="58" x2="95" y2="74" stroke="#8b5cf6" strokeWidth="1.5" opacity="0.7" />
+                <line x1="68" y1="58" x2="95" y2="74" stroke="#06b6d4" strokeWidth="1.5" opacity="0.7" />
               </svg>
               <span className="text-lg font-semibold tracking-tight">Prism</span>
               <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">beta</span>

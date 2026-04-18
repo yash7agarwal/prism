@@ -47,14 +47,14 @@ const TIMELINES: { key: Timeline; label: string; accent: string; bg: string; bor
   { key: 'past', label: 'Past', accent: 'text-zinc-400', bg: 'bg-zinc-600/10', border: 'border-zinc-600/30', dot: 'bg-zinc-600' },
   { key: 'present', label: 'Present', accent: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', dot: 'bg-emerald-400' },
   { key: 'emerging', label: 'Emerging', accent: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', dot: 'bg-amber-400' },
-  { key: 'future', label: 'Future', accent: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', dot: 'bg-violet-400' },
+  { key: 'future', label: 'Future', accent: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', dot: 'bg-cyan-400' },
 ]
 
 const CATEGORIES: { key: string; label: string; color: string; Icon: typeof Cpu }[] = [
   { key: 'technology', label: 'Technology', color: 'bg-cyan-500/20 text-cyan-400', Icon: Cpu },
   { key: 'consumer_behavior', label: 'Consumer Behavior', color: 'bg-amber-500/20 text-amber-400', Icon: Users },
   { key: 'regulation', label: 'Regulation', color: 'bg-red-500/20 text-red-400', Icon: Scales },
-  { key: 'demographics', label: 'Demographics', color: 'bg-violet-500/20 text-violet-400', Icon: Users },
+  { key: 'demographics', label: 'Demographics', color: 'bg-cyan-500/20 text-cyan-400', Icon: Users },
   { key: 'market_structure', label: 'Market Structure', color: 'bg-emerald-500/20 text-emerald-400', Icon: Buildings },
   { key: 'general', label: 'General', color: 'bg-zinc-500/20 text-zinc-400', Icon: Globe },
 ]
@@ -220,7 +220,7 @@ export default function TrendsPage({ params }: { params: { id: string } }) {
       {/* Timeline flow */}
       <div className="relative space-y-8">
         {/* Connecting line */}
-        <div className="absolute left-6 top-4 bottom-4 w-px bg-gradient-to-b from-zinc-600 via-emerald-500/40 via-amber-500/40 to-violet-500/40" />
+        <div className="absolute left-6 top-4 bottom-4 w-px bg-gradient-to-b from-zinc-600 via-emerald-500/40 via-amber-500/40 to-cyan-500/40" />
 
         {TIMELINES.map(tl => {
           const sectionTrends = filtered.filter(t => t.timeline === tl.key)

@@ -26,7 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const AGENT_COLORS: Record<string, string> = {
   competitive_intel: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
-  industry_research: 'bg-violet-500/10 text-violet-400 border border-violet-500/20',
+  industry_research: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
   ux_intel: 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
 }
 

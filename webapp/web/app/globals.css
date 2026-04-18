@@ -69,12 +69,12 @@ input, textarea {
 
 /* Spectrum accent — subtle rainbow gradient */
 .spectrum-border {
-  background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #8b5cf6);
+  background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #10b981);
   background-size: 200% 100%;
 }
 
 .spectrum-border-hover:hover {
-  border-image: linear-gradient(90deg, #ef444440, #f9731640, #eab30840, #22c55e40, #06b6d440, #8b5cf640) 1;
+  border-image: linear-gradient(90deg, #ef444440, #f9731640, #eab30840, #22c55e40, #06b6d440, #10b98140) 1;
 }
 
 /* Tab pill active state */
@@ -85,7 +85,7 @@ input, textarea {
 
 /* Subtle card glow on hover */
 .card-glow:hover {
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 
 /* Fade in slide */

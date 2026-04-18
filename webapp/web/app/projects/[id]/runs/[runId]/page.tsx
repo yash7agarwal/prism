@@ -91,7 +91,7 @@ export default function UatRunDetailPage({
             </p>
           </div>
           <div className="text-center shrink-0">
-            <div className="text-5xl font-bold text-zinc-200">{scorePct}</div>
+            <div className="text-2xl font-bold text-zinc-200">{scorePct}</div>
             <div className="text-xs text-zinc-500 uppercase tracking-wider mt-1">match</div>
           </div>
         </div>

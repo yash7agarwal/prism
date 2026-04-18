@@ -18,7 +18,7 @@ const LABELS: Record<PlanType, { icon: React.ReactNode; label: string; classes: 
   design_fidelity: {
     icon: <Palette size={12} />,
     label: 'Design fidelity',
-    classes: 'bg-purple-500/10 text-purple-300 border-purple-500/20',
+    classes: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
   },
   functional_flow: {
     icon: <ArrowsLeftRight size={12} />,

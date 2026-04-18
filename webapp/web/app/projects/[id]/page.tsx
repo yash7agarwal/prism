@@ -255,12 +255,12 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
               {timeline.map((item, idx) => {
                 const meta = item.observation_type ? OBS_TYPE_META[item.observation_type] || OBS_TYPE_META.general : null
                 const Icon = item.type === 'report' ? FileText : (meta?.icon ?? Lightbulb)
-                const iconColor = item.type === 'report' ? 'text-violet-400' : (meta?.color ?? 'text-zinc-400')
+                const iconColor = item.type === 'report' ? 'text-emerald-400' : (meta?.color ?? 'text-zinc-400')
 
                 return (
                   <div key={item.id} className="relative pl-10 group">
                     {/* Timeline dot */}
-                    <div className={`absolute left-2.5 top-4 w-2 h-2 rounded-full ${item.type === 'report' ? 'bg-violet-400' : (meta?.color?.replace('text-', 'bg-') ?? 'bg-zinc-400')}`} />
+                    <div className={`absolute left-2.5 top-4 w-2 h-2 rounded-full ${item.type === 'report' ? 'bg-emerald-400' : (meta?.color?.replace('text-', 'bg-') ?? 'bg-zinc-400')}`} />
 
                     <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl p-4 transition-colors">
                       {/* Header row */}
@@ -268,7 +268,7 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
                         <div className="flex items-center gap-2 min-w-0">
                           <Icon size={14} className={iconColor} weight="duotone" />
                           {item.type === 'report' ? (
-                            <span className="text-xs bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded">Report</span>
+                            <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">Report</span>
                           ) : meta ? (
                             <span className={`text-xs ${meta.color.replace('text-', 'bg-').replace('400', '500/10')} ${meta.color} border ${meta.color.replace('text-', 'border-').replace('400', '500/20')} px-1.5 py-0.5 rounded`}>
                               {meta.label}
@@ -319,7 +319,7 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {[
           { label: 'Ask a question', desc: '"How does our booking compare to Booking.com?"', href: `/projects/${projectId}/ask`, icon: ChatCircle },
           { label: 'View competitors', desc: `${competitorCount} companies tracked`, href: `/projects/${projectId}/competitors`, icon: Binoculars },
