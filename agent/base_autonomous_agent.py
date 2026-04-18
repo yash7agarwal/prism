@@ -312,12 +312,16 @@ class AutonomousAgent(ABC):
                     if block.type == "text":
                         serializable_content.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
-                        serializable_content.append({
+                        entry = {
                             "type": "tool_use",
                             "id": block.id,
                             "name": block.name,
                             "input": block.input,
-                        })
+                        }
+                        # Preserve Gemini thought_signature for round-trip
+                        if hasattr(block, "thought_signature") and block.thought_signature:
+                            entry["thought_signature"] = block.thought_signature
+                        serializable_content.append(entry)
                 else:
                     serializable_content.append(block)
             messages.append({"role": "assistant", "content": serializable_content})

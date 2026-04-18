@@ -157,10 +157,13 @@ def ask_with_tools(
                             "response": {"result": block.get("content", "")},
                         }})
                     elif block.get("type") == "tool_use":
-                        parts.append({"functionCall": {
+                        fc_part: dict = {"functionCall": {
                             "name": block.get("name", ""),
                             "args": block.get("input", {}),
-                        }})
+                        }}
+                        if block.get("thought_signature"):
+                            fc_part["thoughtSignature"] = block["thought_signature"]
+                        parts.append(fc_part)
                     elif block.get("type") == "text":
                         parts.append({"text": block.get("text", "")})
                     else:
@@ -170,10 +173,13 @@ def ask_with_tools(
                     if block.type == "text":
                         parts.append({"text": block.text})
                     elif block.type == "tool_use":
-                        parts.append({"functionCall": {
+                        fc_part2: dict = {"functionCall": {
                             "name": block.name,
                             "args": block.input,
-                        }})
+                        }}
+                        if hasattr(block, "thought_signature") and block.thought_signature:
+                            fc_part2["thoughtSignature"] = block.thought_signature
+                        parts.append(fc_part2)
                 else:
                     parts.append({"text": str(block)})
 
@@ -267,9 +273,10 @@ def _parse_tool_response(data: dict) -> _FakeMessage:
             import uuid
             content_blocks.append(_FakeBlock(
                 "tool_use",
-                id=f"gemini_{uuid.uuid4().hex[:8]}",
+                id=fc.get("id", f"gemini_{uuid.uuid4().hex[:8]}"),
                 name=fc.get("name", ""),
                 input=dict(fc.get("args", {})),
+                thought_signature=part.get("thoughtSignature"),
             ))
         elif "text" in part:
             content_blocks.append(_FakeBlock("text", text=part["text"]))

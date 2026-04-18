@@ -2,6 +2,29 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] — 2026-04-18
+### Added
+- `utils/groq_client.py` — free Llama 3.3 70B synthesis via Groq (14,400 RPD, zero cost)
+- `agent/efficient_researcher.py` — deterministic search + single synthesis (1-2 LLM calls instead of 10-15)
+- `LESSONS.md` — living project chronicle with 7 chapters, decision tradeoff register, provider stack
+- `/project-chronicle` skill — cross-project historian, auto-invoked after git syncs, mandatory tradeoff analysis
+- Anti-hallucination guards on all synthesis prompts (ecosystem-level rule)
+- Tavily as primary web search provider (1000 free/month)
+
+### Changed
+- All 3 agents (competitive, industry, impact) now use efficient researcher — zero tool-use loop dependency
+- Run-all endpoint includes impact_analysis (was only competitive + industry)
+- Gemini thought_signature round-trip preserved (was causing 400 errors)
+- FakeBlock serialization: content blocks converted to plain dicts for JSON compatibility
+- Auto-retry failed work items + dedup + early-stop on 2 consecutive failures
+
+### Fixed
+- DuckDuckGo rate limiting (IP blocked after 50+ rapid searches) → Tavily fallback
+- Groq model updated from decommissioned llama-3.1-70b to llama-3.3-70b
+- Duplicate entities merged (ixigo, Yatra)
+- Trend entities updated with timeline/category metadata (was all MISSING)
+- Tavily API key duplicate prefix fix
+
 ## [0.9.0] — 2026-04-18
 ### Added
 - **Analytical Lenses**: 8 strategic lenses (Product Craft, Growth, Supply, Monetization, Technology, Brand & Trust, Moat, Trajectory) for structured competitive analysis

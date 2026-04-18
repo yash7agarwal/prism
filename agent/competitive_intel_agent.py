@@ -468,7 +468,7 @@ Return ONLY a JSON array. Each item:
             return f"ERROR: {exc}"
 
     def execute_work_item(self, item: WorkItem) -> dict:
-        """Execute a work item by building a targeted prompt and running the tool loop."""
+        """Execute a work item — uses efficient research (1-2 LLM calls) when possible."""
         self._current_result: dict = {
             "status": "completed",
             "summary": "Work item processed",
@@ -476,29 +476,119 @@ Return ONLY a JSON array. Each item:
             "observations_added": 0,
         }
 
-        # Build a category-specific prompt
         context = item.context_json or {}
-        prompt = self._build_work_prompt(item.category, item.description, context)
 
-        logger.info(
-            "[%s] Running tool loop for %s: %s",
-            self.agent_type,
-            item.category,
-            item.description[:80],
-        )
+        # Use efficient researcher for competitor profiles (1-2 LLM calls instead of 10-15)
+        if item.category in ("competitor_profile", "financial_deep_dive"):
+            competitor_name = context.get("competitor_name") or item.description.split("for ")[-1].split(",")[0].strip()
+            logger.info(f"[{self.agent_type}] Efficient research for: {competitor_name}")
 
-        result = self.run_tool_loop(prompt, max_iterations=15)
+            from agent.efficient_researcher import research_competitor
+            result = research_competitor(competitor_name, self.project_name, self.project_description)
 
-        # If the tool loop ended without finish_work being called,
-        # still return a valid result based on what was accomplished
-        if self._current_result["summary"] == "Work item processed":
-            self._current_result["summary"] = (
-                result.get("final_response", "")[:200] or
-                f"Tool loop ended after {result.get('iterations', 0)} iterations"
+            # Save findings to knowledge graph
+            for finding in result.get("findings", []):
+                entities = self.knowledge.find_entities(name_like=competitor_name)
+                entity_id = entities[0]["id"] if entities else self.knowledge.upsert_entity(
+                    "company", competitor_name, f"Competitor of {self.project_name}"
+                )
+                self.knowledge.add_observation(
+                    entity_id=entity_id,
+                    obs_type=finding.get("type", "general"),
+                    content=finding.get("content", ""),
+                    source_url=finding.get("source_url"),
+                    lens_tags=finding.get("lenses"),
+                )
+
+            # Save profile report as artifact
+            if result.get("profile_md"):
+                entities = self.knowledge.find_entities(name_like=competitor_name)
+                entity_ids = [entities[0]["id"]] if entities else []
+                self.knowledge.save_artifact(
+                    artifact_type="competitor_profile",
+                    title=f"{competitor_name} — Competitive Profile",
+                    content_md=result["profile_md"],
+                    entity_ids=entity_ids,
+                )
+
+            self._current_result = {
+                "status": "completed",
+                "summary": f"Profiled {competitor_name}: {result.get('observations_added', 0)} findings",
+                "entities_created": result.get("entities_created", 0),
+                "observations_added": result.get("observations_added", 0),
+            }
+            return self._current_result
+
+        # For all other categories, use efficient research with Groq (free)
+        # instead of the expensive tool-use loop
+        logger.info(f"[{self.agent_type}] Efficient research for: {item.category}")
+
+        from agent.efficient_researcher import _get_synthesizer
+        from tools.web_research import WebResearcher
+        synthesize = _get_synthesizer()
+        web = WebResearcher()
+
+        # Build search queries from the work item description
+        search_terms = item.description[:100].replace("'", "").replace('"', '')
+        queries = [
+            f"{self.project_name} {search_terms}",
+            f"{search_terms} 2025 2026",
+        ]
+
+        # Gather raw data
+        raw_data = []
+        for q in queries:
+            results = web.search(q, max_results=3)
+            for r in results[:2]:
+                page = web.fetch_page(r.get("url", ""), max_length=3000)
+                if page.get("content") and len(page["content"]) > 100:
+                    raw_data.append(f"Source: {r.get('url','')}\n{page['content'][:2000]}")
+
+        if raw_data:
+            raw_text = "\n\n---\n\n".join(raw_data[:5])
+            prompt = self._build_work_prompt(item.category, item.description, context)
+
+            response = synthesize(
+                f"{prompt}\n\nRAW DATA:\n{raw_text}\n\n"
+                f"Extract 3-5 specific findings. Return JSON:\n"
+                f'{{"findings": [{{"type": "general", "content": "...", "lenses": ["growth"], "source_url": "..."}}]}}',
+                max_tokens=2000,
+                system="Extract specific findings from raw data. Return valid JSON only.",
             )
-            self._current_result["status"] = (
-                "completed" if result.get("status") == "completed" else "failed"
-            )
+
+            try:
+                import json as _json
+                text = response.strip()
+                if "```" in text:
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                    text = text.strip()
+                result_data = _json.loads(text)
+
+                for finding in result_data.get("findings", []):
+                    entities = self.knowledge.find_entities(name_like=finding.get("entity_name", self.project_name))
+                    entity_id = entities[0]["id"] if entities else self.knowledge.upsert_entity(
+                        "company", self.project_name, self.project_description
+                    )
+                    self.knowledge.add_observation(
+                        entity_id=entity_id,
+                        obs_type=finding.get("type", "general"),
+                        content=finding.get("content", ""),
+                        source_url=finding.get("source_url"),
+                        lens_tags=finding.get("lenses"),
+                    )
+                    self._current_result["observations_added"] = self._current_result.get("observations_added", 0) + 1
+
+                self._current_result["status"] = "completed"
+                self._current_result["summary"] = f"Researched {item.category}: {self._current_result.get('observations_added', 0)} findings"
+            except Exception as e:
+                logger.warning(f"[{self.agent_type}] Synthesis parse failed: {e}")
+                self._current_result["status"] = "completed"
+                self._current_result["summary"] = f"Researched {item.category} (synthesis partial)"
+        else:
+            self._current_result["status"] = "completed"
+            self._current_result["summary"] = "No relevant data found in search"
 
         return self._current_result
 

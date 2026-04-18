@@ -454,7 +454,7 @@ Return ONLY the JSON array, no other text."""
             return f"ERROR: {exc}"
 
     def execute_work_item(self, item: WorkItem) -> dict:
-        """Execute a work item by building a targeted prompt and running the tool loop."""
+        """Execute using efficient research (Groq free) — no tool-use loop."""
         self._current_result: dict = {
             "status": "completed",
             "summary": "Work item processed",
@@ -462,19 +462,67 @@ Return ONLY the JSON array, no other text."""
             "observations_added": 0,
         }
 
-        # Build a category-specific prompt
         context = item.context_json or {}
+
+        # Use efficient researcher for trend discovery
+        if item.category in ("trend_analysis", "niche_trend_discovery"):
+            from agent.efficient_researcher import research_industry_trends
+            known = [e["name"] for e in self.knowledge.find_entities(entity_type="trend")]
+            result = research_industry_trends(self.project_name, self.project_description, known)
+
+            for trend in result.get("trends", []):
+                meta = {"timeline": trend.get("timeline", "present"), "category": trend.get("category", "general")}
+                meta.update(trend.get("quantification", {}))
+                eid = self.knowledge.upsert_entity("trend", trend["name"], trend.get("description", ""), metadata=meta)
+                if trend.get("source_url"):
+                    self.knowledge.add_observation(eid, "general", trend.get("description", ""), source_url=trend.get("source_url"), lens_tags=["growth"])
+                self._current_result["entities_created"] = self._current_result.get("entities_created", 0) + 1
+
+            self._current_result["status"] = "completed"
+            self._current_result["summary"] = f"Discovered {len(result.get('trends', []))} trends"
+            return self._current_result
+
+        # For all other categories, use search + synthesize (1 LLM call via Groq)
+        logger.info(f"[{self.agent_type}] Efficient research for: {item.category}")
+
+        from agent.efficient_researcher import _get_synthesizer
+        from tools.web_research import WebResearcher
+        synthesize = _get_synthesizer()
+        web = WebResearcher()
+
         prompt = self._build_work_prompt(item.category, item.description, context)
+        search_terms = item.description[:80]
+        queries = [f"{self.project_name} industry {search_terms}", f"{search_terms} 2025 2026"]
 
-        logger.info(
-            "[%s] Running tool loop for %s: %s",
-            self.agent_type,
-            item.category,
-            item.description[:80],
-        )
+        raw_data = []
+        for q in queries:
+            for r in web.search(q, max_results=3)[:2]:
+                page = web.fetch_page(r.get("url", ""), max_length=3000)
+                if page.get("content") and len(page["content"]) > 100:
+                    raw_data.append(f"Source: {r.get('url','')}\n{page['content'][:2000]}")
 
-        self.run_tool_loop(prompt, max_iterations=20)
+        if raw_data:
+            response = synthesize(
+                f"{prompt}\n\nRAW DATA:\n" + "\n---\n".join(raw_data[:5]) +
+                f'\n\nExtract findings. Return JSON: {{"findings": [{{"type": "general", "content": "...", "lenses": ["growth"], "source_url": "..."}}]}}',
+                max_tokens=2000,
+                system="Extract specific industry findings. Return valid JSON only.",
+            )
+            try:
+                text = response.strip()
+                if "```" in text:
+                    text = text.split("```")[1]
+                    if text.startswith("json"): text = text[4:]
+                    text = text.strip()
+                for f in json.loads(text).get("findings", []):
+                    eid = self.knowledge.upsert_entity("trend", f.get("content", "")[:60], f.get("content", ""))
+                    self.knowledge.add_observation(eid, f.get("type", "general"), f.get("content", ""), source_url=f.get("source_url"), lens_tags=f.get("lenses"))
+                    self._current_result["observations_added"] = self._current_result.get("observations_added", 0) + 1
+            except Exception as e:
+                logger.warning(f"[{self.agent_type}] Parse failed: {e}")
 
+        self._current_result["status"] = "completed"
+        self._current_result["summary"] = f"Researched {item.category}: {self._current_result.get('observations_added', 0)} findings"
         return self._current_result
 
     # ------------------------------------------------------------------

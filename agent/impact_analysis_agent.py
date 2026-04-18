@@ -381,7 +381,7 @@ Return ONLY a JSON array. Each item:
             return f"ERROR: {exc}"
 
     def execute_work_item(self, item: WorkItem) -> dict:
-        """Execute a work item by building a targeted prompt and running the tool loop."""
+        """Execute using efficient research (Groq free) — no tool-use loop."""
         self._current_result: dict = {
             "status": "completed",
             "summary": "Work item processed",
@@ -389,29 +389,63 @@ Return ONLY a JSON array. Each item:
             "observations_added": 0,
         }
 
-        # Build a category-specific prompt
         context = item.context_json or {}
-        prompt = self._build_work_prompt(item.category, item.description, context)
+        logger.info(f"[{self.agent_type}] Efficient impact analysis for: {item.category}")
 
-        logger.info(
-            "[%s] Running tool loop for %s: %s",
-            self.agent_type,
-            item.category,
-            item.description[:80],
-        )
+        from agent.efficient_researcher import research_impact_cascade, _get_synthesizer
 
-        result = self.run_tool_loop(prompt, max_iterations=15)
+        # Get trends and competitors from knowledge graph
+        trends = self.knowledge.find_entities(entity_type="trend")
+        competitors = self.knowledge.find_entities(entity_type="company")
+        trend_names = [t["name"] for t in trends]
+        competitor_names = [c["name"] for c in competitors]
 
-        # If the tool loop ended without finish_work being called,
-        # still return a valid result based on what was accomplished
-        if self._current_result["summary"] == "Work item processed":
-            self._current_result["summary"] = (
-                result.get("final_response", "")[:200]
-                or f"Tool loop ended after {result.get('iterations', 0)} iterations"
+        if not trends:
+            self._current_result["summary"] = "No trends found — run industry research first"
+            return self._current_result
+
+        # Process each trend
+        total_effects = 0
+        total_impacts = 0
+        for trend in trends[:5]:  # Cap at 5 trends per session
+            result = research_impact_cascade(
+                trend["name"],
+                trend.get("description", ""),
+                competitor_names[:8],
+                self.project_name,
             )
-            self._current_result["status"] = (
-                "completed" if result.get("status") == "completed" else "failed"
-            )
+
+            # Save effects as entities
+            for effect in result.get("effects", []):
+                effect_id = self.knowledge.upsert_entity(
+                    "effect", effect["name"], effect.get("description", ""),
+                    metadata={"severity": effect.get("severity", "medium"), "timeframe": effect.get("timeframe", "medium")},
+                )
+                self.knowledge.add_relation(trend["id"], effect_id, "causes")
+                total_effects += 1
+
+                # Save impacts on companies
+                for impact in result.get("impacts", []):
+                    if impact.get("effect") == effect["name"]:
+                        company_entities = self.knowledge.find_entities(name_like=impact.get("company", ""))
+                        if company_entities:
+                            self.knowledge.add_relation(
+                                effect_id, company_entities[0]["id"], "impacts",
+                                metadata={"severity": impact.get("severity", "medium"), "is_threat": impact.get("is_threat", True)},
+                            )
+                            self.knowledge.add_observation(
+                                company_entities[0]["id"], "impact_analysis",
+                                impact.get("description", ""), lens_tags=["trajectory"],
+                            )
+                            total_impacts += 1
+
+        self._current_result = {
+            "status": "completed",
+            "summary": f"Mapped {total_effects} effects, {total_impacts} company impacts across {min(len(trends), 5)} trends",
+            "entities_created": total_effects,
+            "observations_added": total_impacts,
+        }
+        return self._current_result
 
         return self._current_result
 
