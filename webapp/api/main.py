@@ -31,7 +31,7 @@ logging.basicConfig(
 app = FastAPI(
     title="Prism API",
     description="Generic UAT planning tool — map any app, generate test plans",
-    version="0.1.0",
+    version="0.9.0",
 )
 
 app.add_middleware(
