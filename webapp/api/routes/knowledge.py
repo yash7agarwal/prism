@@ -1,8 +1,10 @@
 """Knowledge graph API routes — read-only access to Product OS intelligence."""
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from webapp.api.db import get_db
@@ -349,6 +351,331 @@ def get_summary(project_id: int = Query(...), db: Session = Depends(get_db)):
         total_screenshots=total_screenshots,
         stale_artifact_count=stale_artifact_count,
     )
+
+
+# ---- Lens Matrix ----
+
+
+ALL_LENSES = [
+    "product_craft", "growth", "supply", "monetization",
+    "technology", "brand_trust", "moat", "trajectory",
+]
+
+
+@router.get("/lens-matrix")
+def get_lens_matrix(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return a matrix of lens tag counts per competitor entity."""
+    # Get all company entities for the project
+    entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "company",
+        )
+        .order_by(KnowledgeEntity.name)
+        .all()
+    )
+
+    competitors = []
+    for entity in entities:
+        # Get observations with non-null lens_tags
+        observations = (
+            db.query(KnowledgeObservation)
+            .filter(
+                KnowledgeObservation.entity_id == entity.id,
+                KnowledgeObservation.lens_tags.isnot(None),
+            )
+            .all()
+        )
+
+        lens_counts: dict[str, int] = {lens: 0 for lens in ALL_LENSES}
+        total = 0
+        for obs in observations:
+            tags = obs.lens_tags
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if not isinstance(tags, list):
+                continue
+            total += 1
+            for tag in tags:
+                if tag in lens_counts:
+                    lens_counts[tag] += 1
+
+        competitors.append({
+            "id": entity.id,
+            "name": entity.name,
+            "lens_counts": lens_counts,
+            "total_observations": total,
+        })
+
+    return {
+        "lenses": ALL_LENSES,
+        "competitors": competitors,
+    }
+
+
+@router.get("/lens/{lens_name}")
+def get_lens_detail(
+    lens_name: str,
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return all observations tagged with a specific lens, grouped by entity."""
+    if lens_name not in ALL_LENSES:
+        raise HTTPException(status_code=400, detail=f"Unknown lens: {lens_name}")
+
+    # Get all company entities for the project
+    entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "company",
+        )
+        .order_by(KnowledgeEntity.name)
+        .all()
+    )
+
+    result_entities = []
+    for entity in entities:
+        # Use LIKE to find observations where lens_tags JSON contains the lens name
+        observations = (
+            db.query(KnowledgeObservation)
+            .filter(
+                KnowledgeObservation.entity_id == entity.id,
+                KnowledgeObservation.lens_tags.isnot(None),
+                KnowledgeObservation.lens_tags.like(f'%"{lens_name}"%'),
+            )
+            .order_by(KnowledgeObservation.observed_at.desc())
+            .all()
+        )
+
+        if not observations:
+            continue
+
+        result_entities.append({
+            "id": entity.id,
+            "name": entity.name,
+            "entity_type": entity.entity_type,
+            "observations": [
+                {
+                    "id": o.id,
+                    "observation_type": o.observation_type,
+                    "content": o.content,
+                    "source_url": o.source_url,
+                    "lens_tags": o.lens_tags,
+                    "observed_at": o.observed_at.isoformat() if o.observed_at else None,
+                    "recorded_at": o.recorded_at.isoformat() if o.recorded_at else None,
+                    "source_agent": o.source_agent,
+                }
+                for o in observations
+            ],
+        })
+
+    return {
+        "lens": lens_name,
+        "entities": result_entities,
+    }
+
+
+# ---- Trends View ----
+
+
+@router.get("/trends-view")
+def get_trends_view(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return a structured view of industry trends with linked competitors and quantification."""
+    trends_raw = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.project_id == project_id,
+        KnowledgeEntity.entity_type == "trend",
+    ).all()
+
+    result = []
+    for t in trends_raw:
+        meta = t.metadata_json or {}
+
+        # Get observations
+        obs = db.query(KnowledgeObservation).filter(
+            KnowledgeObservation.entity_id == t.id
+        ).order_by(KnowledgeObservation.recorded_at.desc()).limit(5).all()
+
+        # Get adoption (companies linked via addresses_trend relation)
+        adoptions = (
+            db.query(KnowledgeRelation, KnowledgeEntity)
+            .join(KnowledgeEntity, KnowledgeRelation.to_entity_id == KnowledgeEntity.id)
+            .filter(
+                KnowledgeRelation.from_entity_id == t.id,
+                KnowledgeRelation.relation_type.in_(["addresses_trend", "adopts_trend"]),
+            )
+            .all()
+        )
+        # Also check reverse direction
+        adoptions_rev = (
+            db.query(KnowledgeRelation, KnowledgeEntity)
+            .join(KnowledgeEntity, KnowledgeRelation.from_entity_id == KnowledgeEntity.id)
+            .filter(
+                KnowledgeRelation.to_entity_id == t.id,
+                KnowledgeRelation.relation_type.in_(["addresses_trend", "adopts_trend"]),
+            )
+            .all()
+        )
+
+        adoption_list = []
+        for rel, company in list(adoptions) + list(adoptions_rev):
+            rel_meta = rel.metadata_json or {}
+            adoption_list.append({
+                "company_id": company.id,
+                "company_name": company.name,
+                "adoption_level": rel_meta.get("adoption_level", "unknown"),
+            })
+
+        result.append({
+            "id": t.id,
+            "name": t.name,
+            "description": t.description or "",
+            "timeline": meta.get("timeline", "present"),
+            "category": meta.get("category", "general"),
+            "quantification": {
+                k: v for k, v in meta.items()
+                if k in ("market_size", "growth_rate", "search_volume", "traffic_volume", "revenue_impact", "user_demand")
+            },
+            "observations": [
+                {
+                    "id": o.id,
+                    "type": o.observation_type,
+                    "content": o.content[:300],
+                    "source_url": o.source_url,
+                    "recorded_at": o.recorded_at.isoformat(),
+                    "lens_tags": o.lens_tags,
+                }
+                for o in obs
+            ],
+            "adoption": adoption_list,
+            "observation_count": len(obs),
+        })
+
+    # Sort: future > emerging > present > past
+    order = {"future": 0, "emerging": 1, "present": 2, "past": 3}
+    result.sort(key=lambda x: order.get(x["timeline"], 2))
+
+    return {"trends": result}
+
+
+# ---- Impact Graph ----
+
+
+@router.get("/impact-graph")
+def get_impact_graph(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return graph data for the impact visualization: trends → effects → companies."""
+    # 1. Get trend entities
+    trends = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "trend",
+        )
+        .all()
+    )
+
+    # 2. Get effect entities
+    effects = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "effect",
+        )
+        .all()
+    )
+
+    # 3. Get company entities
+    companies = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "company",
+        )
+        .all()
+    )
+
+    # Build a lookup of entity id → node id prefix
+    entity_map: dict[int, dict] = {}
+    nodes = []
+
+    for e in trends:
+        node = {
+            "id": f"trend-{e.id}",
+            "type": "trend",
+            "name": e.name,
+            "description": e.description or "",
+            "metadata": e.metadata_json or {},
+        }
+        nodes.append(node)
+        entity_map[e.id] = node
+
+    for e in effects:
+        meta = e.metadata_json or {}
+        node = {
+            "id": f"effect-{e.id}",
+            "type": "effect",
+            "name": e.name,
+            "description": e.description or "",
+            "metadata": meta,
+        }
+        nodes.append(node)
+        entity_map[e.id] = node
+
+    for e in companies:
+        node = {
+            "id": f"company-{e.id}",
+            "type": "company",
+            "name": e.name,
+            "description": e.description or "",
+            "metadata": e.metadata_json or {},
+        }
+        nodes.append(node)
+        entity_map[e.id] = node
+
+    # 4. Get relevant relations
+    all_entity_ids = list(entity_map.keys())
+    if not all_entity_ids:
+        return {"nodes": [], "edges": []}
+
+    relations = (
+        db.query(KnowledgeRelation)
+        .filter(
+            KnowledgeRelation.relation_type.in_(("causes", "leads_to", "impacts")),
+            KnowledgeRelation.from_entity_id.in_(all_entity_ids),
+            KnowledgeRelation.to_entity_id.in_(all_entity_ids),
+        )
+        .all()
+    )
+
+    # 5. Build edges
+    edges = []
+    for r in relations:
+        from_node = entity_map.get(r.from_entity_id)
+        to_node = entity_map.get(r.to_entity_id)
+        if not from_node or not to_node:
+            continue
+        meta = r.metadata_json or {}
+        edges.append({
+            "from": from_node["id"],
+            "to": to_node["id"],
+            "relation": r.relation_type,
+            "metadata": meta,
+        })
+
+    return {"nodes": nodes, "edges": edges}
 
 
 # ---- Work Items & Sessions ----

@@ -51,6 +51,12 @@ DEFAULT_CONFIG: dict[str, dict[str, Any]] = {
         "max_items_per_session": 3,
         "requires_device": True,
     },
+    "impact_analysis": {
+        "interval_hours": 24,
+        "max_session_duration_s": 300,
+        "max_items_per_session": 2,
+        "requires_device": False,
+    },
 }
 
 
@@ -172,6 +178,14 @@ class ProductOSOrchestrator:
                 logger.warning("[orchestrator] No Android device available for UXIntelAgent")
                 return None
             return UXIntelAgent(self.project_id, db, device)
+
+        if agent_type == "impact_analysis":
+            try:
+                from agent.impact_analysis_agent import ImpactAnalysisAgent
+            except ImportError:
+                logger.warning("[orchestrator] ImpactAnalysisAgent not available")
+                return None
+            return ImpactAnalysisAgent(self.project_id, db)
 
         return None
 
@@ -458,12 +472,15 @@ class ProductOSOrchestrator:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_orchestrator: ProductOSOrchestrator | None = None
+_orchestrators: dict[int, ProductOSOrchestrator] = {}
 
 
 def get_orchestrator(project_id: int) -> ProductOSOrchestrator:
-    """Return (or create) the singleton orchestrator for the given project."""
-    global _orchestrator
-    if _orchestrator is None or _orchestrator.project_id != project_id:
-        _orchestrator = ProductOSOrchestrator(project_id)
-    return _orchestrator
+    """Return (or create) an orchestrator for the given project.
+
+    Each project gets its own orchestrator so multiple projects
+    can run agents in parallel without interfering.
+    """
+    if project_id not in _orchestrators:
+        _orchestrators[project_id] = ProductOSOrchestrator(project_id)
+    return _orchestrators[project_id]

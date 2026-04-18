@@ -242,6 +242,7 @@ class KnowledgeStore:
         evidence: dict | None = None,
         source_url: str | None = None,
         observed_at: datetime | None = None,
+        lens_tags: list[str] | None = None,
     ) -> int:
         """Record an observation about an entity. Returns observation id."""
         obs = KnowledgeObservation(
@@ -252,6 +253,7 @@ class KnowledgeStore:
             source_url=source_url,
             observed_at=observed_at or datetime.utcnow(),
             source_agent=self.agent_type,
+            lens_tags=lens_tags,
         )
         self.db.add(obs)
         self.db.commit()

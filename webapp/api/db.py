@@ -58,6 +58,11 @@ def init_db() -> None:
                 conn.execute(text(
                     "ALTER TABLE test_plans ADD COLUMN plan_type VARCHAR(50) DEFAULT 'feature_flow'"
                 ))
+    if "knowledge_observations" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("knowledge_observations")}
+        with engine.begin() as conn:
+            if "lens_tags" not in existing_cols:
+                conn.execute(text("ALTER TABLE knowledge_observations ADD COLUMN lens_tags JSON"))
 
 
 SCREENSHOTS_DIR = _DATA_DIR / "screenshots"

@@ -66,3 +66,43 @@ input, textarea {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Spectrum accent — subtle rainbow gradient */
+.spectrum-border {
+  background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #8b5cf6);
+  background-size: 200% 100%;
+}
+
+.spectrum-border-hover:hover {
+  border-image: linear-gradient(90deg, #ef444440, #f9731640, #eab30840, #22c55e40, #06b6d440, #8b5cf640) 1;
+}
+
+/* Tab pill active state */
+.tab-active {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: transparent;
+}
+
+/* Subtle card glow on hover */
+.card-glow:hover {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
+}
+
+/* Fade in slide */
+@keyframes fadeInSlide {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-slide {
+  animation: fadeInSlide 0.3s ease-out both;
+}
+
+/* Status pulse */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.status-pulse {
+  animation: statusPulse 2s ease-in-out infinite;
+}

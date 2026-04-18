@@ -246,6 +246,20 @@ export const api = {
   timeline: (projectId: number, limit?: number) =>
     request<any[]>(`/api/knowledge/timeline?project_id=${projectId}${limit ? `&limit=${limit}` : ''}`),
 
+  // Trends view
+  trendsView: (projectId: number) =>
+    request<any>(`/api/knowledge/trends-view?project_id=${projectId}`),
+
+  // Impact graph
+  impactGraph: (projectId: number) =>
+    request<any>(`/api/knowledge/impact-graph?project_id=${projectId}`),
+
+  // Lens matrix & detail
+  lensMatrix: (projectId: number) =>
+    request<any>(`/api/knowledge/lens-matrix?project_id=${projectId}`),
+  lensDetail: (projectId: number, lens: string) =>
+    request<any>(`/api/knowledge/lens/${lens}?project_id=${projectId}`),
+
   // Work items & sessions
   listWorkItems: (projectId: number, agentType?: string, status?: string) =>
     request<WorkItem[]>(
@@ -278,4 +292,5 @@ export const api = {
       method: 'POST',
       timeoutMs: 60_000,
     }),
+
 }

@@ -7,6 +7,7 @@ import {
   Eye,
   MagnifyingGlass,
   ChartLine,
+  GitBranch,
   Lightning,
   Clock,
   CheckCircle,
@@ -43,6 +44,14 @@ const AGENTS = [
     color: 'violet',
     description: 'Maps app flows by navigating the actual Android app. Compares UX patterns across competitors. Requires a connected device.',
     examples: 'Recent output: flow maps, UX comparison screenshots, journey documentation',
+  },
+  {
+    key: 'impact_analysis',
+    label: 'Impact Analysis',
+    icon: GitBranch,
+    color: 'rose',
+    description: 'Traces how macro trends cascade into 2nd and 3rd order effects on competitors.',
+    examples: 'Recent output: trend cascades, company-specific impact assessments',
   },
 ]
 

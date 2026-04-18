@@ -55,6 +55,19 @@ class CompetitiveIntelAgent(AutonomousAgent):
                     "project_description": self.project_description,
                 },
             },
+            {
+                "priority": 7,
+                "category": "contrarian_discovery",
+                "description": (
+                    "Identify INDIRECT and contrarian competitors — companies that "
+                    "don't look like direct competitors but compete for the same customer need. "
+                    "Think substitutes, adjacent categories, and disruptors."
+                ),
+                "context_json": {
+                    "project_name": self.project_name,
+                    "project_description": self.project_description,
+                },
+            },
         ]
 
     def generate_next_work(self) -> list[dict]:
@@ -103,11 +116,13 @@ Already done:
 
 Pick 2-3 SPECIFIC next tasks. Prioritize:
 1. Deep-dive profiles on unprofiled competitors (most valuable)
-2. Feature comparisons on specific features (e.g. "loyalty programs", "cancellation flows")
-3. Refreshing stale profiles only if >7 days old
+2. Financial deep-dives on profiled competitors that lack financial data
+3. Contrarian/indirect competitor discovery if not done yet
+4. Feature comparisons on specific features
+5. Refreshing stale profiles only if >7 days old
 
 Return ONLY a JSON array. Each item:
-{{"priority": 7-9, "category": "competitor_profile"|"feature_comparison"|"competitor_refresh", "description": "specific task", "context_json": {{"competitor_name": "X"}} or {{"feature_name": "Y", "competitors": ["A","B"]}}}}"""
+{{"priority": 7-9, "category": "competitor_profile"|"financial_deep_dive"|"contrarian_discovery"|"feature_comparison"|"competitor_refresh", "description": "specific task", "context_json": {{"competitor_name": "X"}} or {{"feature_name": "Y", "competitors": ["A","B"]}}}}"""
 
         try:
             response = ask(prompt, max_tokens=2048)
@@ -278,6 +293,11 @@ Return ONLY a JSON array. Each item:
                             "type": "object",
                             "description": "Supporting evidence or data points.",
                         },
+                        "lenses": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Analytical lenses this finding relates to. Choose from: product_craft, growth, supply, monetization, technology, brand_trust, moat, trajectory",
+                        },
                     },
                     "required": ["entity_name", "observation_type", "content"],
                 },
@@ -384,11 +404,16 @@ Return ONLY a JSON array. Each item:
             f'3. Pricing and monetization moves (commission changes, subscription tiers)\n'
             f'4. App store signals (rating trends, recent review complaints, update notes)\n'
             f'5. Strategic moves (acquisitions, partnerships, new markets, hiring patterns)\n'
-            f'6. UX innovations (specific flows that are better/worse than ours)\n\n'
+            f'6. UX innovations (specific flows that are better/worse than ours)\n'
+            f'7. FINANCIALS: Revenue, PAT, market cap, YoY growth from annual reports/filings\n'
+            f'8. INDIRECT COMPETITORS: Think contrarian — who competes for the same need '
+            f'through substitutes, adjacent categories, or platform plays?\n\n'
             f'WORKFLOW RULES:\n'
             f'- Search, read 2-3 pages max, extract specific findings, save, move on\n'
             f'- Do NOT rabbit-hole into 10+ searches on one topic\n'
             f'- Each save_finding must have a source_url — no unsourced assertions\n'
+            f'- Every save_finding MUST include a "lenses" array with 1-3 lens tags from:\n'
+            f'  product_craft, growth, supply, monetization, technology, brand_trust, moat, trajectory\n'
             f'- Call finish_work within 8-10 tool calls — be efficient\n'
             f'- Prefer recent sources (2025-2026). Skip anything older than 2023.\n\n'
             f'Current knowledge state:\n'
@@ -557,6 +582,7 @@ Return ONLY a JSON array. Each item:
             content=inp["content"],
             evidence=inp.get("evidence"),
             source_url=inp.get("source_url"),
+            lens_tags=inp.get("lenses"),
         )
 
         self._current_result["observations_added"] = (
@@ -669,18 +695,26 @@ Return ONLY a JSON array. Each item:
             competitor_name = context.get("competitor_name", description)
             return (
                 f"Deep-dive on {competitor_name}. Find SPECIFIC, ACTIONABLE intelligence.\n\n"
-                f"Research exactly these 5 things (one save_finding each):\n"
-                f"1. RECENT MOVES: What did they launch/change in the last 90 days? "
-                f"Search '{competitor_name} new features 2025 2026' and their blog/newsroom\n"
-                f"2. APP SIGNALS: Search their Play Store listing. What's their rating? "
-                f"What do recent 1-star reviews complain about? What's in recent update notes?\n"
-                f"3. PRICING: How do they monetize? Commission rates, subscription tiers, "
-                f"convenience fees. Search '{competitor_name} pricing fees commission'\n"
-                f"4. FEATURE DIFF: What specific feature do they have that {self.project_name} "
-                f"does NOT? Be specific — name the feature and what it does.\n"
-                f"5. STRATEGIC THREAT: What is the single biggest threat this competitor "
-                f"poses to {self.project_name} in the next 12 months?\n\n"
-                f"After saving all 5 findings, generate a competitor_profile report "
+                f"Research these areas (one save_finding per area):\n\n"
+                f"1. FINANCIALS: Search '{competitor_name} revenue annual report FY2025 FY2026'. "
+                f"Find: revenue, PAT/net income, YoY growth rate, market cap (if listed), "
+                f"key financial ratios. Check investor presentations, earnings calls, "
+                f"annual reports. Lenses: [monetization, growth]\n\n"
+                f"2. SCALE & GEOGRAPHY: How big are they? Employee count, user base, "
+                f"countries/cities served, new market expansions. What's their geographic "
+                f"focus and where are they expanding? Lenses: [growth, supply]\n\n"
+                f"3. PRODUCT & FEATURES: What specific features do they have that "
+                f"{self.project_name} does NOT? App rating, recent update notes, "
+                f"key product differentiators. Lenses: [product_craft, technology]\n\n"
+                f"4. MONETIZATION: Commission rates, subscription tiers, convenience fees, "
+                f"ARPU if available. How does their pricing compare? Lenses: [monetization]\n\n"
+                f"5. STRATEGIC MOVES: Recent acquisitions, partnerships, fundraising, "
+                f"leadership changes, hiring patterns. What's the single biggest threat "
+                f"to {self.project_name}? Lenses: [trajectory, moat]\n\n"
+                f"6. STOCK & SENTIMENT (if public): Stock price trend, analyst consensus, "
+                f"institutional investor moves, short interest. "
+                f"Search '{competitor_name} stock analysis 2025 2026'. Lenses: [trajectory]\n\n"
+                f"After saving findings, generate a competitor_profile report "
                 f"and call finish_work. Every finding MUST have a source_url."
             )
 
@@ -694,6 +728,50 @@ Return ONLY a JSON array. Each item:
                 f"3. Search news for any acquisitions, partnerships, or pivots\n\n"
                 f"Only save genuinely NEW findings. If nothing new, call finish_work "
                 f"with summary 'No significant updates found'. Do not rehash old info."
+            )
+
+        elif category == "contrarian_discovery":
+            known = [e["name"] for e in self.knowledge.find_entities(entity_type="company")]
+            return (
+                f"Think like a contrarian strategist. Find INDIRECT competitors of "
+                f"{self.project_name} that most people wouldn't consider competitors.\n\n"
+                f"Product: {self.project_description}\n"
+                f"Already known (direct): {', '.join(known) if known else 'none'}\n\n"
+                f"Think about:\n"
+                f"1. SUBSTITUTES: What alternatives solve the same customer need differently? "
+                f"(e.g., for Lenskart: local optical stores, LASIK surgery, online generic "
+                f"eyewear from Amazon)\n"
+                f"2. ADJACENT CATEGORIES: Who competes for the same wallet share or time? "
+                f"(e.g., for travel OTA: Google Flights, airline direct booking, travel "
+                f"influencers on YouTube, corporate travel managers)\n"
+                f"3. DISRUPTORS: Who could make {self.project_name}'s model obsolete? "
+                f"(e.g., AI trip planners, super apps, government portals like IRCTC)\n"
+                f"4. PLATFORM THREATS: Which platforms could absorb this functionality? "
+                f"(e.g., Google, Apple Maps, WhatsApp, payment apps)\n\n"
+                f"For each indirect competitor found, call save_competitor with "
+                f"description explaining WHY they're a threat despite not being obvious. "
+                f"Tag them with metadata: {{\"competitor_type\": \"indirect\"}}.\n"
+                f"Target: 4-6 non-obvious competitors. Call finish_work when done."
+            )
+
+        elif category == "financial_deep_dive":
+            competitor_name = context.get("competitor_name", description)
+            return (
+                f"Financial deep-dive on {competitor_name}.\n\n"
+                f"Search for annual reports, investor presentations, earnings calls:\n"
+                f"1. '{competitor_name} annual report 2025 2026 revenue'\n"
+                f"2. '{competitor_name} investor presentation earnings'\n"
+                f"3. '{competitor_name} stock analysis market cap'\n\n"
+                f"Extract and save:\n"
+                f"- Revenue (absolute + YoY growth %)\n"
+                f"- PAT / Net income\n"
+                f"- Market cap (if listed)\n"
+                f"- User/customer count\n"
+                f"- Key business metrics (GMV, take rate, ARPU)\n"
+                f"- Geographic revenue split\n"
+                f"- Segment-wise revenue\n\n"
+                f"Save each data point as a finding with observation_type='metric' "
+                f"and lenses=['monetization', 'growth']. Source URL is mandatory."
             )
 
         elif category == "feature_comparison":

@@ -109,7 +109,28 @@ class AutonomousAgent(ABC):
         items_failed = 0
         knowledge_added = 0
 
-        # Get pending work items
+        # Auto-retry failed items: reset them to pending so they get picked up
+        failed_items = (
+            self.db.query(WorkItem)
+            .filter(
+                WorkItem.agent_type == self.agent_type,
+                WorkItem.project_id == self.project_id,
+                WorkItem.status == "failed",
+            )
+            .all()
+        )
+        if failed_items:
+            logger.info(
+                f"[{self.agent_type}] Resetting {len(failed_items)} failed items to pending for retry"
+            )
+            for fi in failed_items:
+                fi.status = "pending"
+                fi.result_summary = None
+                fi.started_at = None
+                fi.completed_at = None
+            self.db.commit()
+
+        # Get pending work items (includes freshly-retried ones)
         pending = (
             self.db.query(WorkItem)
             .filter(
@@ -155,6 +176,19 @@ class AutonomousAgent(ABC):
                 .all()
             )
 
+        # Deduplicate: if multiple items target the same competitor, keep only the highest priority
+        seen_descriptions = set()
+        deduped = []
+        for item in pending:
+            # Use category + first 40 chars of description as dedup key
+            key = f"{item.category}:{item.description[:40]}"
+            if key not in seen_descriptions:
+                seen_descriptions.add(key)
+                deduped.append(item)
+        if len(deduped) < len(pending):
+            logger.info(f"[{self.agent_type}] Deduped {len(pending)} items to {len(deduped)}")
+        pending = deduped
+
         # Execute work items
         for item in pending:
             # Check bounds
@@ -196,6 +230,16 @@ class AutonomousAgent(ABC):
                 item.result_summary = str(e)[:500]
                 item.completed_at = datetime.utcnow()
                 items_failed += 1
+
+                # If 2+ consecutive failures, stop the session — likely a systemic
+                # issue (rate limit, billing) that won't resolve by retrying immediately
+                if items_failed >= 2 and items_completed == 0:
+                    logger.warning(
+                        f"[{self.agent_type}] 2 consecutive failures with 0 successes — "
+                        f"stopping session to avoid wasting API calls"
+                    )
+                    self.db.commit()
+                    break
 
             self.db.commit()
 
@@ -260,8 +304,23 @@ class AutonomousAgent(ABC):
                     response.usage, "output_tokens", 0
                 )
 
-            # Append assistant message
-            messages.append({"role": "assistant", "content": response.content})
+            # Append assistant message — convert content blocks to plain dicts
+            # so they're JSON-serializable (needed for Gemini _FakeBlock objects)
+            serializable_content = []
+            for block in response.content:
+                if hasattr(block, "type"):
+                    if block.type == "text":
+                        serializable_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        serializable_content.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        })
+                else:
+                    serializable_content.append(block)
+            messages.append({"role": "assistant", "content": serializable_content})
 
             if response.stop_reason == "end_turn":
                 # Extract final text from content blocks

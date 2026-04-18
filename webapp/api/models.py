@@ -291,6 +291,8 @@ class KnowledgeObservation(Base):
     superseded_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("knowledge_observations.id", ondelete="SET NULL"), nullable=True
     )
+    # Analytical lenses: e.g. ["monetization", "growth", "product_craft"]
+    lens_tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     entity: Mapped[KnowledgeEntity] = relationship(back_populates="observations")
 

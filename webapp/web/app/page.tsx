@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Folder, Plus } from '@phosphor-icons/react'
+import { Folder, Plus, ArrowRight } from '@phosphor-icons/react'
 import { api } from '@/lib/api'
 import type { Project } from '@/lib/types'
 
@@ -78,19 +78,28 @@ export default function HomePage() {
             <Link
               key={p.id}
               href={`/projects/${p.id}`}
-              className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl p-5 transition-colors duration-200 animate-fade-in-up"
+              className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl p-5 transition-all duration-200 animate-fade-in-up card-glow group"
               style={{ animationDelay: `${index * 80}ms` } as React.CSSProperties}
             >
-              <h3 className="font-medium text-base mb-1">{p.name}</h3>
+              <div className="flex items-start justify-between mb-2">
+                <h3 className="font-medium text-base group-hover:text-emerald-400 transition-colors">{p.name}</h3>
+                <ArrowRight size={16} className="text-zinc-700 group-hover:text-emerald-400 transition-colors mt-1" />
+              </div>
               {p.app_package && (
-                <p className="text-xs text-zinc-500 font-mono mb-2">{p.app_package}</p>
+                <p className="text-xs text-zinc-600 font-mono mb-2">{p.app_package}</p>
               )}
               {p.description && (
-                <p className="text-sm text-zinc-400 line-clamp-2">{p.description}</p>
+                <p className="text-sm text-zinc-400 line-clamp-2 mb-3">{p.description}</p>
               )}
-              <p className="text-xs text-zinc-600 mt-3">
-                Created {new Date(p.created_at).toLocaleDateString()}
-              </p>
+              <div className="flex items-center justify-between pt-3 border-t border-zinc-800/50">
+                <p className="text-xs text-zinc-600">
+                  Created {new Date(p.created_at).toLocaleDateString()}
+                </p>
+                <div className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/50" />
+                  <span className="text-xs text-zinc-600">Active</span>
+                </div>
+              </div>
             </Link>
           ))}
         </div>

@@ -2,6 +2,38 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-04-18
+### Added
+- **Analytical Lenses**: 8 strategic lenses (Product Craft, Growth, Supply, Monetization, Technology, Brand & Trust, Moat, Trajectory) for structured competitive analysis
+- `lens_tags` column on observations — agents auto-tag findings with relevant lenses
+- Lens matrix view (`/projects/[id]/lenses`) — competitors × lenses with drill-down per cell
+- Lens detail view (`/projects/[id]/lenses/[lens]`) — all findings for one lens across competitors
+- **Impact Analysis Agent** (`agent/impact_analysis_agent.py`) — traces macro trend → 2nd order effect → 3rd order company-specific impact
+- Impact cascade view (`/projects/[id]/impacts`) — expandable trend cards with severity/timeframe badges
+- **Industry Trends view** (`/projects/[id]/trends`) — timeline (past/present/emerging/future) with category filter, quantification data, and competitor adoption mapping
+- Niche trend discovery (women-friendly travel, pet travel, accessibility, sustainability, etc.)
+- Trend quantification work items (market size, search volume, growth rate)
+- Trend adoption mapping (which competitors address which trends)
+- **Financial intelligence** in competitor profiles — revenue, PAT, market cap, YoY growth, stock sentiment
+- **Contrarian competitor discovery** — indirect competitors (substitutes, adjacent categories, platform threats, disruptors)
+- `financial_deep_dive` and `contrarian_discovery` work item categories
+- New API endpoints: `/lens-matrix`, `/lens/{name}`, `/impact-graph`, `/trends-view`
+- Design refresh: prism triangle logo, pill-style tabs, card glow effects, favicon, spectrum accents
+
+### Changed
+- Tab bar restructured: Overview | Competitors | Lenses | Trends | Impacts | Ask | Intelligence | UAT
+- Competitor detail page: markdown renderer for bold/lists/headers, expandable reports, grouped findings by type
+- Overview page: clickable stats, product timeline with source links, live agent activity panel
+- Impacts page: replaced SVG circle graph with intuitive expandable cascade list
+
+### Fixed
+- `_FakeBlock not JSON serializable` — content blocks now serialized to plain dicts in tool-use loop
+- Gemini converter handles `tool_use` dict blocks from serialized messages
+- Failed work items auto-retry on next session start
+- Work item deduplication prevents redundant profiling of already-researched competitors
+- Early-stop after 2 consecutive failures prevents wasting API calls on systemic errors
+- Multi-project orchestrator: per-project instances instead of singleton (parallel projects work)
+
 ## [0.8.1] — 2026-04-18
 ### Changed
 - Rebranded all source files from "MMT-OS" / "AppUAT" to "Prism" across 13 files (docstrings, comments, user-facing strings, FastAPI title, package.json name)

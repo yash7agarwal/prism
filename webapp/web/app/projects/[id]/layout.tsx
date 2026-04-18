@@ -10,18 +10,22 @@ import {
   DeviceMobile,
   Binoculars,
   ChatCircle,
-  Queue,
+  Funnel,
+  GitBranch,
+  TrendUp,
 } from '@phosphor-icons/react'
 import { api } from '@/lib/api'
 import type { ProjectDetail } from '@/lib/types'
 
 const tabs = [
   { label: 'Overview', href: '', icon: House },
+  { label: 'Competitors', href: '/competitors', icon: Binoculars },
+  { label: 'Lenses', href: '/lenses', icon: Funnel },
+  { label: 'Trends', href: '/trends', icon: TrendUp },
+  { label: 'Impacts', href: '/impacts', icon: GitBranch },
+  { label: 'Ask', href: '/ask', icon: ChatCircle },
   { label: 'Intelligence', href: '/intelligence', icon: Brain },
   { label: 'UAT', href: '/uat', icon: DeviceMobile },
-  { label: 'Competitors', href: '/competitors', icon: Binoculars },
-  { label: 'Ask', href: '/ask', icon: ChatCircle },
-  { label: 'Backlog', href: '/backlog', icon: Queue },
 ]
 
 export default function ProjectLayout({
@@ -54,7 +58,7 @@ export default function ProjectLayout({
         className="inline-flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 text-sm mb-4 transition-colors duration-150"
       >
         <ArrowLeft size={14} />
-        All projects
+        All products
       </Link>
 
       {/* Project header */}
@@ -78,8 +82,10 @@ export default function ProjectLayout({
         </div>
       ) : null}
 
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent mb-4" />
+
       {/* Tab bar */}
-      <nav className="flex gap-1 border-b border-zinc-800 mb-6 -mx-1 overflow-x-auto">
+      <nav className="flex gap-1 mb-6 p-1 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
         {tabs.map((tab) => {
           const tabPath = `${basePath}${tab.href}`
           const isActive =
@@ -92,10 +98,10 @@ export default function ProjectLayout({
             <Link
               key={tab.label}
               href={tabPath}
-              className={`inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors duration-150 whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors duration-150 whitespace-nowrap ${
                 isActive
-                  ? 'text-emerald-400 border-emerald-400'
-                  : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:border-zinc-700'
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
               }`}
             >
               <Icon size={16} weight={isActive ? 'fill' : 'regular'} />

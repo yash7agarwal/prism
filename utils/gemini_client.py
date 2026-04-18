@@ -151,11 +151,15 @@ def ask_with_tools(
         elif isinstance(msg["content"], list):
             for block in msg["content"]:
                 if isinstance(block, dict):
-                    # tool_result from user
                     if block.get("type") == "tool_result":
                         parts.append({"functionResponse": {
                             "name": block.get("tool_use_id", "unknown"),
                             "response": {"result": block.get("content", "")},
+                        }})
+                    elif block.get("type") == "tool_use":
+                        parts.append({"functionCall": {
+                            "name": block.get("name", ""),
+                            "args": block.get("input", {}),
                         }})
                     elif block.get("type") == "text":
                         parts.append({"text": block.get("text", "")})

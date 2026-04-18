@@ -156,7 +156,7 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
           <div className="text-xs text-zinc-600 mt-0.5">evidence-backed facts</div>
         </Link>
 
-        <Link href={`/projects/${projectId}/intelligence`} className="bg-zinc-900 border border-zinc-800 hover:border-emerald-500/30 rounded-xl p-4 transition-colors group">
+        <Link href={`/projects/${projectId}/competitors`} className="bg-zinc-900 border border-zinc-800 hover:border-emerald-500/30 rounded-xl p-4 transition-colors group">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
               <FileText size={14} className="text-zinc-500 group-hover:text-emerald-400 transition-colors" />
@@ -165,7 +165,7 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
             <ArrowRight size={12} className="text-zinc-700 group-hover:text-emerald-400 transition-colors" />
           </div>
           <div className="text-2xl font-semibold">{reportCount}</div>
-          <div className="text-xs text-zinc-600 mt-0.5">competitor profiles & analyses</div>
+          <div className="text-xs text-zinc-600 mt-0.5">click a competitor to see full report</div>
         </Link>
 
         <Link href={`/projects/${projectId}/uat`} className="bg-zinc-900 border border-zinc-800 hover:border-emerald-500/30 rounded-xl p-4 transition-colors group">

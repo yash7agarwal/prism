@@ -83,6 +83,15 @@ class IndustryResearchAgent(AutonomousAgent):
                 ),
                 "context_json": None,
             },
+            {
+                "priority": 5,
+                "category": "niche_trend_discovery",
+                "description": (
+                    "Discover niche and emerging trends in this industry that represent "
+                    "underserved segments or future growth areas"
+                ),
+                "context_json": None,
+            },
         ]
 
     def generate_next_work(self) -> list[dict]:
@@ -135,7 +144,7 @@ Based on this state, suggest 2-4 high-value next research items. Consider:
 
 Return a JSON array of work items. Each item must have:
 - "priority": int 1-10 (higher = more important)
-- "category": one of "article_reading", "trend_tracking", "regulatory_scan", "market_analysis", "new_entrant_scan", "report_generation"
+- "category": one of "article_reading", "trend_tracking", "regulatory_scan", "market_analysis", "new_entrant_scan", "report_generation", "niche_trend_discovery", "trend_quantification", "trend_adoption_mapping"
 - "description": what to research
 - "context_json": optional dict with entity names or other context
 
@@ -281,6 +290,11 @@ Return ONLY the JSON array, no other text."""
                             "type": "object",
                             "description": "Supporting evidence or data points.",
                         },
+                        "lenses": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Analytical lenses this finding relates to. Choose from: product_craft, growth, supply, monetization, technology, brand_trust, moat, trajectory",
+                        },
                     },
                     "required": ["topic", "observation_type", "content"],
                 },
@@ -385,12 +399,20 @@ Return ONLY the JSON array, no other text."""
             f'2. Platform moves by Google/Apple that change distribution\n'
             f'3. New business models emerging (subscription travel, BNPL for travel)\n'
             f'4. Specific data points from analyst reports (Skift, PhocusWire, CAPA)\n'
-            f'5. Funding rounds and acquisitions that signal market shifts\n\n'
+            f'5. Funding rounds and acquisitions that signal market shifts\n'
+            f'6. NICHE TRENDS: Emerging consumer segments (women travelers, pet travel, solo, accessibility)\n'
+            f'7. TREND QUANTIFICATION: Search volumes, market sizes, growth rates for each trend\n'
+            f'8. TREND ADOPTION: Which companies are addressing which trends, and how well\n\n'
             f'RULES:\n'
             f'- Every finding MUST have a source_url\n'
+            f'- Every save_finding MUST include a "lenses" array with 1-3 lens tags from:\n'
+            f'  product_craft, growth, supply, monetization, technology, brand_trust, moat, trajectory\n'
             f'- Prefer sources from 2025-2026. Skip pre-2024 data.\n'
             f'- Search, read 2-3 pages, extract specific findings, save, move on\n'
-            f'- Call finish_work within 8-10 tool calls\n\n'
+            f'- Call finish_work within 8-10 tool calls\n'
+            f'- When saving a trend finding, include timeline (past/present/emerging/future) and\n'
+            f'  category (consumer_behavior/technology/regulation/demographics/market_structure) in the content\n'
+            f'- Quantify trends wherever possible: market size, growth rate, search volume\n\n'
             f'Current knowledge state:\n'
             f'{json.dumps(summary, indent=2, default=str)}'
         )
@@ -512,6 +534,7 @@ Return ONLY the JSON array, no other text."""
             content=inp["content"],
             evidence=inp.get("evidence"),
             source_url=inp.get("source_url"),
+            lens_tags=inp.get("lenses"),
         )
 
         self._current_result["observations_added"] = (
@@ -658,6 +681,58 @@ Return ONLY the JSON array, no other text."""
                 f"industry overview or trend report using generate_report. "
                 f"Include market size, key trends, regulatory landscape, major "
                 f"players, and outlook."
+            )
+
+        elif category == "niche_trend_discovery":
+            known_trends = self.knowledge.find_entities(entity_type="trend")
+            known_names = [t["name"] for t in known_trends]
+            return (
+                f"Discover NICHE and EMERGING trends in the {self.project_name} industry "
+                f"that most companies haven't fully addressed yet.\n\n"
+                f"Already known trends: {', '.join(known_names) if known_names else 'none'}\n\n"
+                f"Think about underserved segments and future shifts:\n"
+                f"- DEMOGRAPHIC shifts (solo travelers, pet owners, elderly, Gen Z, women safety)\n"
+                f"- BEHAVIORAL changes (bleisure travel, workations, micro-trips, spontaneous booking)\n"
+                f"- TECHNOLOGY-driven (voice search booking, AR previews, AI concierge, blockchain loyalty)\n"
+                f"- SUSTAINABILITY (carbon-neutral travel, eco-lodging, slow travel)\n"
+                f"- ACCESSIBILITY (differently-abled travel, language barriers, rural connectivity)\n"
+                f"- ECONOMIC (budget micro-travel, BNPL for travel, subscription travel)\n\n"
+                f"For each trend discovered:\n"
+                f"1. Use save_finding with observation_type='general' and include in the content:\n"
+                f"   - What the trend is and why it matters\n"
+                f"   - Where it sits on the timeline (past/present/emerging/future)\n"
+                f"   - Which category it falls under (consumer_behavior/technology/regulation/demographics/market_structure)\n"
+                f"2. Try to quantify: search volume, market size, growth rate\n"
+                f"3. Tag with relevant lenses\n\n"
+                f"For the entity name, use the trend name (e.g., 'Women-friendly travel').\n"
+                f"Set entity_type metadata via save_finding for entity_name matching a trend entity.\n"
+                f"Target: 5-8 niche trends. Call finish_work when done."
+            )
+
+        elif category == "trend_quantification":
+            trend_name = context.get("trend_name", description)
+            return (
+                f"Quantify the trend: {trend_name}\n\n"
+                f"Search for data points that measure the real size and growth of this trend:\n"
+                f"1. Search volume: '{trend_name} search trends Google Trends'\n"
+                f"2. Market size: '{trend_name} market size 2025 2026'\n"
+                f"3. Revenue impact: How much revenue does this trend drive for companies?\n"
+                f"4. User demand: Survey data, review mentions, app feature requests\n"
+                f"5. Traffic volume: Any data on booking volumes or user counts\n\n"
+                f"Save each quantification as a finding with observation_type='metric' "
+                f"and lenses=['growth']. Source URL mandatory.\n"
+                f"Also note which companies are best addressing this trend."
+            )
+
+        elif category == "trend_adoption_mapping":
+            return (
+                f"Map which competitors are addressing which industry trends.\n\n"
+                f"For each known trend, evaluate each competitor:\n"
+                f"- Does their app/service address this trend? (yes/no/partially)\n"
+                f"- How mature is their offering? (strong/emerging/absent)\n"
+                f"- Any specific features they've built for this trend?\n\n"
+                f"Save findings linking each competitor to each trend they address.\n"
+                f"Use lenses ['product_craft', 'growth'] for each finding."
             )
 
         else:
