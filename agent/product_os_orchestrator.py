@@ -55,6 +55,16 @@ DEFAULT_CONFIG: dict[str, dict[str, Any]] = {
         "max_items_per_session": 2,
         "requires_device": False,
     },
+    # Daily digest push. Runs once per 24h per project, reads the last 24h of
+    # intel output, synthesizes, pushes to Telegram if PRISM_DIGEST_CHAT_ID
+    # is set. Duration cap is just a safety net — the digest itself is a
+    # single Claude synthesis call that takes <30s normally.
+    "digest": {
+        "interval_hours": 24,
+        "max_session_duration_s": 120,
+        "max_items_per_session": 1,
+        "requires_device": False,
+    },
 }
 
 
@@ -174,6 +184,14 @@ class ProductOSOrchestrator:
                 logger.warning("[orchestrator] IntelAgent not available")
                 return None
             return IntelAgent(self.project_id, db)
+
+        if agent_type == "digest":
+            try:
+                from agent.digest_runner import DigestRunner
+            except ImportError:
+                logger.warning("[orchestrator] DigestRunner not available")
+                return None
+            return DigestRunner(self.project_id, db)
 
         if agent_type == "competitive_intel":
             try:
@@ -404,25 +422,34 @@ class ProductOSOrchestrator:
                 .all()
             )
 
-            # New entities
+            # New entities (fixed: model has first_seen_at, not created_at)
             new_entities = (
                 db.query(KnowledgeEntity)
                 .filter(
                     KnowledgeEntity.project_id == self.project_id,
-                    KnowledgeEntity.created_at >= cutoff,
+                    KnowledgeEntity.first_seen_at >= cutoff,
                 )
                 .all()
             )
 
-            # New artifacts
+            # New artifacts — exclude quality_flag rows; those are the gate,
+            # not content. (fixed: model has generated_at, not created_at)
             new_artifacts = (
                 db.query(KnowledgeArtifact)
                 .filter(
                     KnowledgeArtifact.project_id == self.project_id,
-                    KnowledgeArtifact.created_at >= cutoff,
+                    KnowledgeArtifact.generated_at >= cutoff,
+                    KnowledgeArtifact.artifact_type != "quality_flag",
                 )
                 .all()
             )
+
+            # Drop observations that got flagged by QualityReviewAgent so the
+            # digest doesn't surface ungrounded claims.
+            recent_observations = [
+                o for o in recent_observations
+                if not (o.evidence_json or {}).get("quality_flag_id")
+            ]
 
             if not recent_observations and not new_entities and not new_artifacts:
                 return "No new intelligence gathered in the last 24 hours."
