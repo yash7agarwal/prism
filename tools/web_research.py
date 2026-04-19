@@ -78,6 +78,11 @@ class WebResearcher:
         )
         resp.raise_for_status()
         data = resp.json()
+        try:
+            from utils import cost_tracker
+            cost_tracker.record("tavily", search_count=1, call_type="search")
+        except Exception:
+            pass
         return [
             {
                 "title": r.get("title", ""),

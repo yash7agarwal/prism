@@ -24,6 +24,22 @@ FAST_MODEL = "llama-3.1-8b-instant"
 _API_BASE = "https://api.groq.com/openai/v1/chat/completions"
 
 
+def _record(data: dict, model: str, call_type: str) -> None:
+    """Persist a cost_ledger row. Fail-silent."""
+    try:
+        from utils import cost_tracker
+        usage = data.get("usage", {}) or {}
+        cost_tracker.record(
+            "groq",
+            tokens_in=usage.get("prompt_tokens", 0) or 0,
+            tokens_out=usage.get("completion_tokens", 0) or 0,
+            call_type=call_type,
+            model=model,
+        )
+    except Exception:
+        pass
+
+
 def _api_key() -> str:
     key = os.environ.get("GROQ_API_KEY")
     if not key:
@@ -73,6 +89,7 @@ def synthesize(
                 continue
             r.raise_for_status()
             data = r.json()
+            _record(data, model, "synthesis")
             return data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
             if e.response.status_code >= 500 and attempt < retries - 1:

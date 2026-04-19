@@ -14,6 +14,22 @@ FAST_MODEL = "claude-haiku-4-5-20251001"
 _client: anthropic.Anthropic | None = None
 
 
+def _record(resp: Any, model: str, call_type: str) -> None:
+    """Persist a cost_ledger row. Fail-silent."""
+    try:
+        from utils import cost_tracker
+        usage = getattr(resp, "usage", None)
+        cost_tracker.record(
+            "claude",
+            tokens_in=getattr(usage, "input_tokens", 0) or 0,
+            tokens_out=getattr(usage, "output_tokens", 0) or 0,
+            call_type=call_type,
+            model=model,
+        )
+    except Exception:
+        pass
+
+
 def _provider() -> str:
     """Read LLM_PROVIDER env var. Defaults to 'claude'. Set to 'gemini' to use Google Gemini."""
     return os.environ.get("LLM_PROVIDER", "claude").lower()
@@ -53,6 +69,7 @@ def ask(
     for attempt in range(retries):
         try:
             resp = _get_client().messages.create(**kwargs)
+            _record(resp, model, "synthesis")
             return resp.content[0].text
         except anthropic.RateLimitError:
             time.sleep(2 ** attempt * 5)
@@ -124,6 +141,7 @@ def ask_vision(
     for attempt in range(retries):
         try:
             resp = _get_client().messages.create(**kwargs)
+            _record(resp, model, "vision")
             return resp.content[0].text
         except anthropic.RateLimitError:
             time.sleep(2 ** attempt * 5)

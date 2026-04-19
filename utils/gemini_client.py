@@ -315,7 +315,20 @@ def _post(model: str, payload: dict, retries: int) -> str:
             r.raise_for_status()
             data = r.json()
             try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                try:
+                    from utils import cost_tracker
+                    um = data.get("usageMetadata", {}) or {}
+                    cost_tracker.record(
+                        "gemini",
+                        tokens_in=um.get("promptTokenCount", 0) or 0,
+                        tokens_out=um.get("candidatesTokenCount", 0) or 0,
+                        call_type="synthesis",
+                        model=model,
+                    )
+                except Exception:
+                    pass
+                return text
             except (KeyError, IndexError) as e:
                 # Sometimes Gemini returns a finishReason instead of content (safety filter, etc.)
                 reason = data.get("candidates", [{}])[0].get("finishReason", "unknown")

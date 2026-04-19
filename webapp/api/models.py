@@ -270,6 +270,41 @@ class WorkItem(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class CostLedger(Base):
+    """One row per external API call — LLM (Groq/Claude/Gemini) or search (Tavily).
+
+    Powers /api/cost/summary and the quota-alert warning system. Fail-silent
+    writes from `utils.cost_tracker.record`; if writing a row errors, agents
+    keep working and we only log the failure.
+    """
+    __tablename__ = "cost_ledger"
+    __table_args__ = (
+        Index("ix_cost_ledger_provider_recorded", "provider", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # groq | claude | gemini | tavily
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    # synthesis | vision | search | tool_use | unknown
+    call_type: Mapped[str] = mapped_column(String(20), default="unknown")
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    search_count: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional linkage to a session/project, when caller has that context.
+    agent_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class AgentSession(Base):
     """Tracks a single agent execution session."""
     __tablename__ = "agent_sessions"
