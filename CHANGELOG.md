@@ -2,6 +2,20 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-04-20 — Phase 1.5: quality regression alerts + one-click purge
+
+Closes the feedback loop that v0.11.0 opened: the system now notices when its own quality is degrading and gives the PM a one-tap remedy for bad data.
+
+### Added
+- `agent/quality_regression.py` — computes 7-day rolling `retrieval_yield` + `novelty_yield` per project from `AgentSession.quality_score_json`, compares to prior 7-day window, and sends a Telegram alert when either metric drops >30% w/w. Includes cheap heuristic hypotheses: "daemon may not be firing", "validator drop rate up (model regression?)", "novelty_yield low (KG saturated — broaden brief)". Runnable as `python -m agent.quality_regression` or via the orchestrator daemon's once-per-24h tick.
+- `POST /api/knowledge/entities/{id}/purge` — tombstones a mis-tagged entity (`user_signal='dismissed'` + `dismissed_reason`), cascade-deletes its observations + relations, and enqueues a high-priority `niche_trend_discovery` work item. The canonical name is automatically picked up by the next `ResearchBrief` as a dismissed negative example.
+- Telegram `/purge <entity_id> [reason]` — mirrors the HTTP endpoint so bad data can be fixed from the phone.
+
+### Changed
+- `webapp/api/routes/knowledge.get_trends_view` now filters out entities with `user_signal='dismissed'` — purged or user-dismissed items no longer clutter the trends page.
+- `webapp/api/routes/knowledge.get_entity` detail endpoint now returns `user_signal` + `dismissed_reason` (was constructing `KnowledgeEntityDetail` by hand and missed the new fields).
+- `agent/product_os_orchestrator` daemon now schedules a daily quality-regression check as a detached thread alongside the existing per-agent session scheduling.
+
 ## [0.11.0] — 2026-04-20 — Compounding research architecture (Phase 1)
 
 Cross-industry contamination bug (Swiggy getting travel trends because `efficient_researcher.py` hardcoded 6 of 8 trend queries to travel terms) is now architecturally impossible. Queries derive from a typed per-project brief + Haiku-planned research plan, not from templates. Synthesis output passes a deterministic source-URL validator before touching the KG. Feedback loop wired from Telegram buttons.

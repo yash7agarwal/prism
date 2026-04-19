@@ -80,6 +80,10 @@ class ProductOSOrchestrator:
         self._session_locks: dict[str, threading.Lock] = {
             agent_type: threading.Lock() for agent_type in self.config
         }
+        # F2: daily quality-regression check — in-memory last-run marker.
+        # Persistence across restarts is not needed; a restart just means the
+        # next tick (up to 24h later) fires a check early, which is harmless.
+        self._last_regression_check_at: datetime | None = None
 
     # ------------------------------------------------------------------
     # Core: run a single agent session
@@ -272,9 +276,39 @@ class ProductOSOrchestrator:
                         exc_info=True,
                     )
 
+            # F2: daily quality-regression check (all projects at once).
+            try:
+                now = datetime.utcnow()
+                due = (
+                    self._last_regression_check_at is None
+                    or (now - self._last_regression_check_at) > timedelta(hours=24)
+                )
+                if due:
+                    self._last_regression_check_at = now
+                    threading.Thread(
+                        target=self._run_regression_check,
+                        name="quality-regression",
+                        daemon=True,
+                    ).start()
+            except Exception as e:
+                logger.error("[orchestrator] regression-check scheduler failed: %s", e)
+
             time.sleep(check_interval_s)
 
         logger.info("[orchestrator] Daemon stopped")
+
+    def _run_regression_check(self) -> None:
+        """F2: run quality-regression check across all projects.
+
+        Fires once per 24h from the daemon tick. Delivers alerts via
+        Telegram for any project whose 7-day retrieval_yield or
+        novelty_yield dropped >30% vs the prior 7 days.
+        """
+        try:
+            from agent.quality_regression import run_once
+            run_once()
+        except Exception as exc:
+            logger.error("[orchestrator] regression check failed: %s", exc, exc_info=True)
 
     def start_daemon(self) -> None:
         """Start the daemon in a background thread."""

@@ -444,6 +444,61 @@ async def _intel_digest(update: Update) -> None:
 
 
 # ---------------------------------------------------------------------------
+# /purge — F3: one-shot "bad data → fresh run" command
+# ---------------------------------------------------------------------------
+
+
+async def cmd_purge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Usage: /purge <entity_id> [reason]
+
+    Calls the same POST /purge endpoint the web UI uses. Tombstones the
+    entity so the canonical blocks re-learning, cascade-deletes its
+    observations + relations, and enqueues a fresh industry_research run.
+    """
+    import httpx
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "*Purge a mis-tagged trend*\n\n"
+            "Usage: `/purge <entity_id> [reason]`\n\n"
+            "Example: `/purge 148 wrong industry — Swiggy is food delivery, not travel`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    try:
+        entity_id = int(args[0])
+    except (ValueError, TypeError):
+        await update.message.reply_text("First argument must be an integer entity_id.")
+        return
+    reason = " ".join(args[1:]).strip() or "[purged via Telegram]"
+
+    url = f"{_api_base()}/api/knowledge/entities/{entity_id}/purge"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json={"signal": "dismissed", "reason": reason})
+    except Exception as exc:
+        await update.message.reply_text(f"Purge request failed: {exc}")
+        return
+
+    if resp.status_code == 404:
+        await update.message.reply_text(f"No entity with id={entity_id}")
+        return
+    if resp.status_code != 200:
+        await update.message.reply_text(f"Server returned {resp.status_code}: {resp.text[:200]}")
+        return
+
+    out = resp.json()
+    await update.message.reply_text(
+        f"✔ Purged entity {out['entity_id']}\n"
+        f"• {out['observations_deleted']} observations deleted\n"
+        f"• {out['relations_deleted']} relations deleted\n"
+        f"• Enqueued industry_research work item #{out['work_item_enqueued']}\n"
+        f"• Reason: {out['reason']}\n\n"
+        f"The next research run will skip this canonical and try to fill the gap."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Research-digest callbacks (F1 — keep/dismiss/star buttons)
 # ---------------------------------------------------------------------------
 #
@@ -559,6 +614,7 @@ def main() -> None:
     # Product OS intelligence commands
     app.add_handler(CommandHandler("new", cmd_new))
     app.add_handler(CommandHandler("intel", cmd_intel))
+    app.add_handler(CommandHandler("purge", cmd_purge))
     # Research-digest buttons + optional reason replies
     app.add_handler(CallbackQueryHandler(cb_signal, pattern=r"^sig:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_reply))

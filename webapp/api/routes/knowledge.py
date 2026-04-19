@@ -113,6 +113,8 @@ def get_entity(entity_id: int, db: Session = Depends(get_db)):
         confidence=entity.confidence,
         first_seen_at=entity.first_seen_at,
         last_updated_at=entity.last_updated_at,
+        user_signal=entity.user_signal,
+        dismissed_reason=entity.dismissed_reason,
         observations=[KnowledgeObservationOut.model_validate(o) for o in observations],
         relations=[KnowledgeRelationOut.model_validate(r) for r in relations],
     )
@@ -147,6 +149,72 @@ def set_entity_signal(
     db.commit()
     db.refresh(entity)
     return entity
+
+
+@router.post("/entities/{entity_id}/purge")
+def purge_entity(
+    entity_id: int,
+    body: EntitySignalIn,
+    db: Session = Depends(get_db),
+):
+    """F3: purge a mis-tagged entity and enqueue a fresh research run.
+
+    Non-destructive on the entity itself (marks user_signal='dismissed' so the
+    canonical name blocks re-learning in the next research brief). Destructive
+    on the entity's observations and relations — they were the bad data we
+    want gone from trends-view, lens pages, and the impact graph.
+
+    Side effect: schedules a high-priority `niche_trend_discovery` work item
+    for this project's industry_research agent to refill the trend shelf.
+    """
+    entity = db.get(KnowledgeEntity, entity_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    reason = (body.reason or "[purged]").strip()[:500]
+    project_id = entity.project_id
+
+    # Cascade-delete observations and relations attached to this entity.
+    obs_deleted = (
+        db.query(KnowledgeObservation)
+        .filter(KnowledgeObservation.entity_id == entity_id)
+        .delete(synchronize_session=False)
+    )
+    rel_deleted = (
+        db.query(KnowledgeRelation)
+        .filter(
+            (KnowledgeRelation.from_entity_id == entity_id)
+            | (KnowledgeRelation.to_entity_id == entity_id)
+        )
+        .delete(synchronize_session=False)
+    )
+
+    # Keep the entity row as a dismissed tombstone — the canonical_name still
+    # blocks re-learning via the research brief's dismissed_canonicals list.
+    entity.user_signal = "dismissed"
+    entity.dismissed_reason = reason
+
+    # Enqueue a fresh research run for the project.
+    wi = WorkItem(
+        project_id=project_id,
+        agent_type="industry_research",
+        priority=8,
+        category="niche_trend_discovery",
+        description=f"Post-purge re-research (purged entity {entity_id}: {entity.name})",
+        status="pending",
+    )
+    db.add(wi)
+    db.commit()
+
+    return {
+        "status": "purged",
+        "entity_id": entity_id,
+        "project_id": project_id,
+        "observations_deleted": obs_deleted,
+        "relations_deleted": rel_deleted,
+        "work_item_enqueued": wi.id,
+        "reason": reason,
+    }
 
 
 @router.get("/entities/{entity_id}/observations", response_model=list[KnowledgeObservationOut])
@@ -525,10 +593,15 @@ def get_trends_view(
     project_id: int = Query(...),
     db: Session = Depends(get_db),
 ):
-    """Return a structured view of industry trends with linked competitors and quantification."""
+    """Return a structured view of industry trends with linked competitors and quantification.
+
+    Dismissed entities are hidden — purge + user-dismiss both land here.
+    """
     trends_raw = db.query(KnowledgeEntity).filter(
         KnowledgeEntity.project_id == project_id,
         KnowledgeEntity.entity_type == "trend",
+        (KnowledgeEntity.user_signal.is_(None))
+        | (KnowledgeEntity.user_signal != "dismissed"),
     ).all()
 
     result = []
