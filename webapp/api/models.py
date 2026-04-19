@@ -80,7 +80,8 @@ class TestPlan(Base):
     feature_description: Mapped[str] = mapped_column(Text, nullable=False)
     voice_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | approved
-    # plan_type: feature_flow | design_fidelity | functional_flow | deeplink_utility | edge_cases
+    # plan_type: feature_flow | functional_flow | deeplink_utility | edge_cases
+    # (design_fidelity moved to Loupe in v0.10.0)
     plan_type: Mapped[str] = mapped_column(String(50), default="feature_flow")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

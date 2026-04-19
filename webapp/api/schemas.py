@@ -114,8 +114,8 @@ class FlowInferenceResult(BaseModel):
 class TestPlanCreate(BaseModel):
     feature_description: str
     voice_transcript: str | None = None
-    figma_file_id: str | None = None  # if set, generate design-fidelity cases
-    plan_type: str | None = None  # feature_flow | design_fidelity | functional_flow | deeplink_utility | edge_cases
+    figma_file_id: str | None = None  # accepted for API back-compat; design_fidelity moved to Loupe in v0.10.0
+    plan_type: str | None = None  # feature_flow | functional_flow | deeplink_utility | edge_cases
 
 
 class SuiteCreate(BaseModel):

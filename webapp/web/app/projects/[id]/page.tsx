@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
-  DeviceMobile,
   ChatCircle,
   Binoculars,
   Play,
@@ -168,17 +167,6 @@ export default function OverviewPage({ params }: { params: { id: string } }) {
           <div className="text-xs text-zinc-600 mt-0.5">click a competitor to see full report</div>
         </Link>
 
-        <Link href={`/projects/${projectId}/uat`} className="bg-zinc-900 border border-zinc-800 hover:border-emerald-500/30 rounded-xl p-4 transition-colors group">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-1.5">
-              <DeviceMobile size={14} className="text-zinc-500 group-hover:text-emerald-400 transition-colors" />
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">UAT</span>
-            </div>
-            <ArrowRight size={12} className="text-zinc-700 group-hover:text-emerald-400 transition-colors" />
-          </div>
-          <div className="text-2xl font-semibold">{stats?.screen_count ?? 0}</div>
-          <div className="text-xs text-zinc-600 mt-0.5">screens mapped, {stats?.plan_count ?? 0} plans</div>
-        </Link>
       </div>
 
       {/* Live agent activity */}

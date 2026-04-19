@@ -1,7 +1,6 @@
 'use client'
 
 import {
-  Palette,
   ArrowsLeftRight,
   Link as LinkIcon,
   Warning,
@@ -14,11 +13,6 @@ const LABELS: Record<PlanType, { icon: React.ReactNode; label: string; classes: 
     icon: <ListChecks size={12} />,
     label: 'Feature flow',
     classes: 'bg-zinc-500/10 text-zinc-300 border-zinc-500/20',
-  },
-  design_fidelity: {
-    icon: <Palette size={12} />,
-    label: 'Design fidelity',
-    classes: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
   },
   functional_flow: {
     icon: <ArrowsLeftRight size={12} />,

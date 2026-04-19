@@ -25,7 +25,7 @@ export default function HomePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Your products</h1>
           <p className="text-zinc-400 mt-1 text-sm">
-            Each product tracks one app — UAT, competitive research, and market intelligence in one place.
+            Each product tracks one competitive landscape — research, trends, impact analysis, and lens-based insights in one place.
           </p>
         </div>
         <Link

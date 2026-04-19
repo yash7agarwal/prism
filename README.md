@@ -67,22 +67,29 @@ Prism is a product operating system for PMs. It combines automated UAT testing w
 ```
 agent/                          # Autonomous agents
   base_autonomous_agent.py      # Base class: work queue + tool-use loop
+  intel_agent.py                # Compound competitive_intel + industry_research
   competitive_intel_agent.py    # Competitor discovery and profiling
   industry_research_agent.py    # Industry trends and market data
-  ux_intel_agent.py             # App flow mapping via device
+  impact_analysis_agent.py      # 2nd/3rd-order effects of trends on competitors
+  quality_review_agent.py       # Grounding gate — flags unsourced claims
+  digest_runner.py              # Daily Telegram digest push
+  ux_intel_agent.py             # App UI capture (disabled post-Loupe carve; v0.10.1 work)
   product_os_orchestrator.py    # Agent scheduler and coordinator
   query_engine.py               # NL query → synthesized answer
   knowledge_store.py            # Knowledge graph CRUD interface
-  orchestrator.py               # UAT orchestrator (legacy)
+  efficient_researcher.py       # Deterministic search + Groq synthesis
 tools/                          # Deterministic execution layer
-  android_device.py             # ADB wrapper for device control
-  vision_navigator.py           # Claude vision → tap loop
   web_research.py               # Web search + content extraction
+utils/                          # LLM clients + cost tracking
+  claude_client.py              # Anthropic SDK wrapper
+  gemini_client.py              # Google Gemini (fallback)
+  groq_client.py                # Groq Llama 3.3 (primary synthesis)
+  cost_tracker.py               # Per-call ledger + quota alerts
 webapp/
   api/                          # FastAPI backend
-    models.py                   # 17 SQLAlchemy tables
-    routes/                     # REST endpoints (projects, knowledge, product-os, etc.)
-    services/                   # Screen analysis, planners, UAT runner
+    models.py                   # Knowledge graph + work tables
+    routes/                     # REST endpoints (projects, knowledge, product-os, cost, digest)
+    services/                   # Screen analysis, test planners
   web/                          # Next.js 14 frontend
     app/
       page.tsx                  # Home — product list

@@ -4,8 +4,6 @@
 import type {
   AgentSession,
   Edge,
-  FigmaImport,
-  FigmaImportSummary,
   FlowInferenceResult,
   InferredEdge,
   KnowledgeArtifact,
@@ -21,8 +19,6 @@ import type {
   Screen,
   TestCase,
   TestPlan,
-  UatRun,
-  UatRunSummary,
   WorkItem,
 } from './types'
 
@@ -153,62 +149,8 @@ export const api = {
   deleteCase: (caseId: number) =>
     request<void>(`/api/cases/${caseId}`, { method: 'DELETE' }),
 
-  // ---------- UAT runs ----------
-
-  listUatRuns: (projectId: number) =>
-    request<UatRunSummary[]>(`/api/projects/${projectId}/uat/runs`),
-
-  getUatRun: (runId: number) =>
-    request<UatRun>(`/api/uat/runs/${runId}`),
-
-  createUatRun: (
-    projectId: number,
-    data: {
-      apk_path?: string | null
-      figma_file_id: string
-      feature_description?: string | null
-      skip_install?: boolean
-    }
-  ) =>
-    request<UatRun>(`/api/projects/${projectId}/uat/runs`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-      timeoutMs: 600_000, // runs can take 60-300s depending on frame count + device speed
-    }),
-
-  deleteUatRun: (runId: number) =>
-    request<void>(`/api/uat/runs/${runId}`, { method: 'DELETE' }),
-
-  // Image URLs (not JSON — used as <img src=...>)
-  uatFigmaImageUrl: (runId: number, frameId: number) =>
-    `/api/uat/runs/${runId}/frames/${frameId}/figma_image`,
-  uatAppScreenshotUrl: (runId: number, frameId: number) =>
-    `/api/uat/runs/${runId}/frames/${frameId}/app_screenshot`,
-  uatDiffImageUrl: (runId: number, frameId: number) =>
-    `/api/uat/runs/${runId}/frames/${frameId}/diff_image`,
-  uatReportMdUrl: (runId: number) =>
-    `/api/uat/runs/${runId}/report.md`,
-
-  // ---------- Figma imports ----------
-
-  listFigmaImports: (projectId: number) =>
-    request<FigmaImportSummary[]>(`/api/projects/${projectId}/figma/imports`),
-
-  getFigmaImport: (importId: number) =>
-    request<FigmaImport>(`/api/figma/imports/${importId}`),
-
-  createFigmaImport: (projectId: number, figma_file_id: string) =>
-    request<FigmaImport>(`/api/projects/${projectId}/figma/imports`, {
-      method: 'POST',
-      body: JSON.stringify({ figma_file_id }),
-      timeoutMs: 180_000, // import takes 30-90s for typical files
-    }),
-
-  deleteFigmaImport: (importId: number) =>
-    request<void>(`/api/figma/imports/${importId}`, { method: 'DELETE' }),
-
-  figmaFrameImageUrl: (importId: number, frameId: number) =>
-    `/api/figma/imports/${importId}/frames/${frameId}/image`,
+  // UAT + Figma endpoints removed in v0.10.0 — moved to Loupe
+  // (github.com/yash7agarwal/loupe).
 
   // ---------- Product OS / Knowledge ----------
 

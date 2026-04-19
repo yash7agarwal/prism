@@ -83,10 +83,10 @@ export interface TestCase {
 
 export type PlanType =
   | 'feature_flow'
-  | 'design_fidelity'
   | 'functional_flow'
   | 'deeplink_utility'
   | 'edge_cases'
+// design_fidelity (Figma-based) moved to Loupe in v0.10.0.
 
 export interface TestPlan {
   id: number
@@ -99,99 +99,8 @@ export interface TestPlan {
   cases: TestCase[]
 }
 
-// ---------- UAT runs ----------
-
-export type UatVerdict = 'MATCHES' | 'DIFFERS' | 'UNREACHABLE' | 'ERROR'
-export type UatRunStatus = 'pending' | 'running' | 'completed' | 'failed'
-
-export interface UatFrameResult {
-  id: number
-  run_id: number
-  figma_frame_name: string
-  figma_node_id: string
-  figma_image_path: string | null
-  app_screenshot_path: string | null
-  diff_image_path: string | null
-  match_score: number | null
-  verdict: UatVerdict
-  issues: string[] | null
-  navigation_steps: number
-  elapsed_s: number | null
-}
-
-export interface UatRun {
-  id: number
-  project_id: number
-  apk_path: string | null
-  apk_version: string | null
-  package_name: string | null
-  figma_file_id: string | null
-  feature_description: string | null
-  status: UatRunStatus
-  total_frames: number
-  matched: number
-  mismatched: number
-  unreachable: number
-  overall_match_score: number | null
-  report_md_path: string | null
-  error: string | null
-  started_at: string
-  completed_at: string | null
-  frame_results: UatFrameResult[]
-}
-
-export interface UatRunSummary {
-  id: number
-  project_id: number
-  apk_version: string | null
-  figma_file_id: string | null
-  feature_description: string | null
-  status: UatRunStatus
-  total_frames: number
-  matched: number
-  mismatched: number
-  unreachable: number
-  overall_match_score: number | null
-  started_at: string
-  completed_at: string | null
-}
-
-// ---------- Figma imports ----------
-
-export type FigmaImportStatus = 'fetching' | 'ready' | 'failed'
-
-export interface FigmaFrame {
-  id: number
-  import_id: number
-  node_id: string
-  name: string
-  page_name: string | null
-  frame_type: string
-  image_path: string | null
-  width: number | null
-  height: number | null
-  x: number | null
-  y: number | null
-  text_content: any[] | null
-  colors: string[] | null
-  fonts: { family: string; size: number; weight: number }[] | null
-}
-
-export interface FigmaImportSummary {
-  id: number
-  project_id: number
-  figma_file_id: string
-  file_name: string | null
-  status: FigmaImportStatus
-  total_frames: number
-  error: string | null
-  imported_at: string
-  completed_at: string | null
-}
-
-export interface FigmaImport extends FigmaImportSummary {
-  frames: FigmaFrame[]
-}
+// UAT + Figma types removed in v0.10.0 — moved to Loupe
+// (github.com/yash7agarwal/loupe).
 
 // ---------- Product OS / Knowledge Graph ----------
 
