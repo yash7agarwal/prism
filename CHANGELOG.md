@@ -2,6 +2,36 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-04-19 — UAT carved out to Loupe
+
+Prism is now a pure product intelligence platform. The UAT half was carved into a sibling repo, **Loupe** (`yash7agarwal/loupe`), using `git filter-repo` to preserve UAT commit history back to v0.1.0. See LESSONS.md for the decision rationale.
+
+### Removed (moved to Loupe)
+- 15 UAT agent files: `flow_explorer_agent`, `scenario_runner_agent`, `evaluator_agent`, `diff_agent`, `figma_comparator`, `figma_journey_parser`, `figma_uat_runner`, `variant_detector`, `health_monitor`, `use_case_registry`, `report_writer_agent`, `quick_uat`, `run_uat`, `run_quick_uat`, `orchestrator` (legacy)
+- 8 UAT tools: `android_device`, `apk_manager`, `emulator_manager`, `quick_navigator`, `vision_navigator`, `visual_diff`, `screenshot`, `report_generator`
+- 3 UAT services: `uat_runner`, `figma_importer`, `figma_test_planner`
+- 2 UAT API routes: `uat_runs`, `figma`
+- 4 UAT tables removed from `models.py`: `UatRun`, `UatFrameResult`, `FigmaImport`, `FigmaFrame` (existing SQLite rows retained, just no code path)
+- UAT Pydantic schemas: `UatRunCreate`, `UatRunOut`, `UatRunSummary`, `UatFrameResultOut`, `FigmaImportCreate`, `FigmaImportSummary`, `FigmaImportOut`, `FigmaFrameOut`
+- Frontend UAT pages: `/projects/[id]/uat`, `/projects/[id]/runs/*`, `FrameComparisonCard` component
+- UAT tab from the project layout navigation (8 tabs → 7)
+- Telegram bot UAT handlers: `/run`, `/status`, `/report`, `/list`, `/cases`, `/builds`, `/use_build`, `/upload_local`, `/run_figma`, all `/appuat_*`, plus `RunTracker`, photo/document/text message handlers, and UAT background workers — bot.py shrunk from 1539 to 467 lines
+- `design_fidelity` plan type and Figma branch in `plans.py` (Figma plans live in Loupe now)
+- `Dockerfile` (Android SDK + emulator) — Loupe owns this now
+- `setup_emulator.sh`, `run_details_uat.py`, `smoke_test.py`, `apks/`, `candidate.apk` handling
+- `mcp_server/` (Android-device MCP tools — UAT-side)
+
+### Changed
+- Renamed `Dockerfile.bot` → `Dockerfile` (now the single canonical image)
+- Updated `docker-compose.yml` and `railway.json` to reference the new Dockerfile; dropped KVM/emulator volumes
+- FastAPI `version` bumped to `0.10.0`; description updated to "Product intelligence platform"
+- Telegram bot `/start` and `/help` texts rewritten around intel commands only
+- `product_os_orchestrator` retains defensive `ux_intel` guards — UX Intel won't instantiate without device tools; this is expected v0.10.0 behaviour. Restoring ADB device capture as a Prism-native capability is v0.10.1 work.
+
+### Migration notes
+- On an upgraded install: existing `UatRun` / `FigmaImport` / `FigmaFrame` rows remain in the SQLite file but are no longer surfaced. Clean them via `DROP TABLE` if desired, or keep as historical.
+- If you depend on UAT, clone [Loupe](https://github.com/yash7agarwal/loupe) and run it standalone — it has its own `loupe.db` and its own API on port 8001.
+
 ## [0.9.2] — 2026-04-18
 ### Changed
 - Aligned entire frontend to DESIGN.md design system — removed all forbidden patterns

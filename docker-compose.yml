@@ -6,12 +6,6 @@ services:
     env_file: .env
     restart: unless-stopped
     volumes:
-      # Persist APKs, reports, and memory across restarts
-      - ./apks:/app/apks
-      - ./reports:/app/reports
+      # Persist memory across restarts
       - ./memory:/app/memory
-    # KVM passthrough for Android emulator hardware acceleration
-    devices:
-      - /dev/kvm:/dev/kvm
-    # Required for ADB inside container
-    network_mode: host
+      - ./webapp/data:/app/webapp/data

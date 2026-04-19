@@ -21,7 +21,6 @@ from webapp.api import models, schemas
 from webapp.api.db import get_db
 from webapp.api.services.deeplink_utility_planner import generate_deeplink_utility_plan
 from webapp.api.services.edge_cases_planner import generate_edge_cases_plan
-from webapp.api.services.figma_test_planner import generate_figma_test_plan
 from webapp.api.services.functional_flow_planner import generate_functional_flow_plan
 from webapp.api.services.test_planner import generate_test_plan
 
@@ -29,10 +28,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["plans"])
 
-# Plan types supported by the planner registry
+# Plan types supported by the planner registry.
+# `design_fidelity` (Figma-based) moved to Loupe in v0.10.0.
 PLAN_TYPES = {
     "feature_flow",
-    "design_fidelity",
     "functional_flow",
     "deeplink_utility",
     "edge_cases",
@@ -116,10 +115,8 @@ def create_suite(
     Gemini RPM limits. Skips `design_fidelity` if no figma_file_id is provided.
     Returns all generated plans in one list.
     """
-    # Determine which plan types to run
+    # Determine which plan types to run (design_fidelity moved to Loupe in v0.10.0)
     plan_types = ["functional_flow", "deeplink_utility", "edge_cases"]
-    if payload.figma_file_id:
-        plan_types.insert(0, "design_fidelity")
 
     plans: list[models.TestPlan] = []
     for i, ptype in enumerate(plan_types):
@@ -242,8 +239,8 @@ def _resolve_plan_type(payload: schemas.TestPlanCreate) -> str:
                 detail=f"Invalid plan_type. Must be one of: {sorted(PLAN_TYPES)}",
             )
         return payload.plan_type
-    # Back-compat: figma_file_id implies design_fidelity; otherwise feature_flow
-    return "design_fidelity" if payload.figma_file_id else "feature_flow"
+    # Figma-based `design_fidelity` moved to Loupe; Prism defaults to feature_flow.
+    return "feature_flow"
 
 
 def _generate_and_persist_plan(
@@ -298,17 +295,6 @@ def _generate_and_persist_plan(
                 feature_description=feature_description,
                 screens=screens_data,
                 edges=edges_data,
-            )
-        elif plan_type == "design_fidelity":
-            if not figma_file_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="design_fidelity plan_type requires figma_file_id",
-                )
-            cases = generate_figma_test_plan(
-                feature_description=feature_description,
-                figma_file_id=figma_file_id,
-                screens=screens_data,
             )
         elif plan_type == "functional_flow":
             cases = generate_functional_flow_plan(

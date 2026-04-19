@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from webapp.api.db import init_db
-from webapp.api.routes import edges, figma, knowledge, plans, product_os, projects, screens, uat_runs
+from webapp.api.routes import edges, knowledge, plans, product_os, projects, screens
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,8 +30,8 @@ logging.basicConfig(
 
 app = FastAPI(
     title="Prism API",
-    description="Generic UAT planning tool — map any app, generate test plans",
-    version="0.9.2",
+    description="Product intelligence platform — competitive research, trends, impacts. UAT lives in Loupe.",
+    version="0.10.0",
 )
 
 app.add_middleware(
@@ -47,8 +47,6 @@ app.include_router(projects.router)
 app.include_router(screens.router)
 app.include_router(edges.router)
 app.include_router(plans.router)
-app.include_router(uat_runs.router)
-app.include_router(figma.router)
 app.include_router(knowledge.router)
 app.include_router(product_os.router)
 
