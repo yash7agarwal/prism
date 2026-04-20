@@ -1,0 +1,59 @@
+# Source authority tiers for research retrieval.
+#
+# Every fetched URL is scored at search time. Tiered sources rise or sink
+# in the retrieval bundle; blocklisted domains are skipped entirely.
+#
+# Tuning here propagates to all projects. If a domain consistently produces
+# hallucinations or shallow content in post-synthesis validation, add it to
+# `blocklist` — the decision compounds across the whole system.
+
+# Hard blocklist — never fetched. Typical reasons: paywalled redirect loops,
+# SEO farms that return 200 with useless body, anti-bot walls.
+blocklist:
+  - "www.moneycontrol.com"        # aggressive 403 to non-browser UAs
+  - "www.business-standard.com"   # paywall + 403
+  - "www.facebook.com"            # public-group URLs 400 without auth
+  - "www.linkedin.com/pulse"      # often walled; keep only if explicitly surfaced
+  - "medium.com"                  # too much SEO-driven content for trend signal
+  - "quora.com"
+
+# Tiered authority — higher tier = higher weight when ranking sources for
+# synthesis. An entity with two tier-1 sources is more trustworthy than
+# an entity with five tier-4 sources. Used by the synthesiser to prefer
+# cited domains when it has to pick a subset.
+tier1_primary:      # regulators, analysts, firm primary-source docs
+  - "sebi.gov.in"
+  - "rbi.org.in"
+  - "trai.gov.in"
+  - "press.gov.in"
+  - "nic.in"
+  - "ec.europa.eu"
+  - "sec.gov"
+  - "iata.org"
+
+tier2_research:     # named analyst firms + research arms
+  - "bain.com"
+  - "mckinsey.com"
+  - "bcg.com"
+  - "deloitte.com"
+  - "kpmg.com"
+  - "pwc.com"
+  - "capgemini.com"
+  - "redseer.com"
+  - "phocuswire.com"
+  - "skift.com"
+
+tier3_trade:        # reputable trade press
+  - "economictimes.indiatimes.com"
+  - "livemint.com"
+  - "thehindubusinessline.com"
+  - "inc42.com"
+  - "techcrunch.com"
+  - "theverge.com"
+  - "techinasia.com"
+  - "restofworld.org"
+  - "entrackr.com"
+  - "moneycontrol.com"
+
+tier4_general:      # everything else fetchable — no boost, no penalty
+  - "*"

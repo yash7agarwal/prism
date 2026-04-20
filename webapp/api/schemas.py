@@ -192,6 +192,29 @@ class EntitySignalIn(BaseModel):
     reason: str | None = None  # optional free-text "why" for dismissals
 
 
+class CrossProjectHypothesisOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    source_project_id: int
+    target_project_id: int
+    source_entity_id: int
+    source_entity_name: str
+    source_description: str | None
+    rationale: str | None
+    similarity_score: float
+    status: str
+    decided_at: UTCDatetime | None
+    created_at: UTCDatetime
+
+
+class CrossProjectSuggestIn(BaseModel):
+    """POST /api/xproj/suggest — propose a hypothesis from source_entity into target_project."""
+    source_entity_id: int
+    target_project_id: int
+    rationale: str | None = None
+    similarity_score: float = 0.0
+
+
 class KnowledgeEntityDetail(KnowledgeEntityOut):
     observations: list["KnowledgeObservationOut"] = []
     relations: list["KnowledgeRelationOut"] = []

@@ -2,6 +2,27 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-04-20 — Phase 2 + Phase 3 complete
+
+Closes out the research-architecture roadmap. Every surface from `/Users/yash/.claude/plans/polished-hatching-bubble.md` is now in the repo and verified.
+
+### Added
+- `agent/decay.py` — daily sweep marks trends + regulations with no observation in 60 days as `decay_state='needs_revalidation'`. The research brief surfaces them as validation targets so the next planner run probes for fresh evidence.
+- `agent/semantic_dedupe.py` + `utils/gemini_embeddings.py` — embedding cosine dedupe layer (Gemini text-embedding-004, 768-dim, stored as float32 bytes in the existing `KnowledgeEmbedding` table). AUTO_MERGE at 0.90, LLM tie-breaker (Haiku) in the ambiguous 0.78–0.90 band. Graceful fallback when provider unavailable: upsert proceeds as if the layer didn't exist. Verified via monkey-patched test (similar "Dark store fulfilment" variants merge; unrelated concepts stay distinct).
+- `agent/pattern_writer.py` — post-session hook that extracts successful planner queries into `memory/patterns.md` when both `retrieval_yield ≥ 0.7` AND `novelty_yield ≥ 0.5`. Idempotent by session id. Live test back-filled the Swiggy session 98 plan.
+- `config/source_authority.yaml` + loader in `tools/web_research` — hard blocklist for paywalled / anti-bot domains (Moneycontrol, Business Standard, Medium, LinkedIn Pulse), plus tier 1–4 authority mapping. Every search result is tier-ranked before return; `search()` over-fetches +5 so blocklist doesn't starve `max_results`.
+- `tools/rss_retriever.py` + `tools/reddit_retriever.py` + `config/rss_feeds.yaml` + `config/reddit_subreddits.yaml` — feature-flagged alt retrieval surfaces gated by `PRISM_RETRIEVERS=rss,reddit`. Both normalize industry strings (underscore → space) when matching config keys, so "food delivery and quick commerce" from the planner correctly maps to the `food_delivery` + `quick_commerce` buckets. Merge into the same retrieval bundle as web search and pass through the source_url validator.
+- `CrossProjectHypothesis` table + `webapp/api/routes/xproj.py` — suggestion queue for cross-project transfer. `POST /api/xproj/suggest` registers a hypothesis; `GET /api/xproj/suggestions` lists by target project; `POST /{id}/accept` clones the entity at confidence 0.4 (forcing re-validation on the target); `POST /{id}/reject` marks it. Human-gated by construction — no auto-promotion, ever. Prevents the v0.11.0 contamination class.
+- Trends-page Keep / Dismiss / Star / Purge buttons at `/projects/[id]/trends` (`webapp/web/app/projects/[id]/trends/page.tsx`) — mirrors the Telegram digest feedback surface for desktop. Dismissed entities disappear optimistically; purge confirms before cascade-delete + re-enqueue. Wires the `user_signal` column end-to-end.
+- `KnowledgeEntity.decay_state` column — idempotent ALTER TABLE in `db.init_db()`.
+- `agent/quality_regression._run_regression_check` now also calls `agent.decay.sweep_once()` on its 24h tick.
+
+### Changed
+- `agent/efficient_researcher.research_industry_trends` — RSS + Reddit results join the retrieval bundle when `PRISM_RETRIEVERS` is set. Kept at `raw_data.append` level so all downstream stages (source_url validator, synthesis cap, quality scoring) treat them identically.
+- `agent/research_brief` — unions observation-age staleness with the persistent `decay_state='needs_revalidation'` flag when building `stale_trend_canonicals`.
+- `agent/knowledge_store.upsert_entity` — embedding layer slotted between trigram and insert. Lazily writes embeddings on every new entity via `semantic_dedupe.store_new_embedding`.
+- `tools/web_research.WebResearcher.search` — now post-processes every provider's results through `_rank_by_authority`; blocklisted hosts dropped, each result carries a `tier` field, sorted tier-ascending.
+
 ## [0.12.2] — 2026-04-20 — Railway deploy prep
 
 ### Added

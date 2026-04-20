@@ -204,3 +204,29 @@ When HealthMonitor detects a failure, always attempt recovery in this order:
 4. Circuit break after 3 attempts → mark blocked, log gap, continue to next scenario
 
 Never restart ADB for non-DEVICE_UNRESPONSIVE states — it's too disruptive.
+## Swiggy — food delivery and quick commerce  (session 98)
+
+_2026-04-20T15:02:28.683474Z_ · retrieval_yield=0.71 · novelty_yield=1.00
+
+**discovery**
+- Swiggy Instamart vs Zepto 10-minute vs 25-minute basket value comparison
+- ONDC seller onboarding impact on Swiggy Zomato market share 2024
+- Swiggy Dineout vs Zomato District strategy for event ticketing and dining out
+- Swiggy Minis seller retention rates for D2C brands in India
+- Swiggy HDFC Bank credit card rewards impact on platform loyalty and LTV
+- Gig worker social security bills in Karnataka and Rajasthan impact on delivery costs
+
+**deepening**
+- Swiggy The Bowl Company hygiene standards and temperature control sensors implementation
+- Swiggy Instamart dark store fresh fruit and vegetable prep upselling conversion rates
+- McDonalds and Dominos Speed-Critical Mission SLAs on Swiggy vs Zomato platforms
+
+**validation**
+- Swiggy Instamart dark store perishables wastage vs Blinkit fresh produce inventory turnover
+- Consumer complaints regarding Swiggy platform fee increases vs order frequency churn
+
+**lateral**
+- Zypp Electric and EV fleet adoption for Indian last-mile delivery providers
+- Quick commerce expansion into pharma and electronics retail by Blinkit and Instamart
+
+---

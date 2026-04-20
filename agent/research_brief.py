@@ -172,6 +172,9 @@ def build_brief(db: Session, project_id: int) -> ResearchBrief:
     stale_trend_canonicals: list[str] = []
 
     trend_entity_ids: list[int] = []
+    # Decay-flagged entities from agent/decay.py are authoritative — any trend
+    # with decay_state='needs_revalidation' goes straight to the validation list.
+    decay_flagged: set[str] = set()
     for e in entities:
         canonical = (e.canonical_name or e.name).lower()
 
@@ -199,6 +202,8 @@ def build_brief(db: Session, project_id: int) -> ResearchBrief:
         elif e.entity_type == "trend":
             recent_trends.append(ref)
             trend_entity_ids.append(e.id)
+            if e.decay_state == "needs_revalidation":
+                decay_flagged.add(canonical)
 
         if e.confidence < LOW_CONFIDENCE_THRESHOLD:
             low_confidence.append(ref)
@@ -237,6 +242,8 @@ def build_brief(db: Session, project_id: int) -> ResearchBrief:
             latest = latest_by_entity.get(tid)
             if latest is None or latest < stale_cutoff:
                 stale_trend_canonicals.append(tref.canonical_name)
+    # Union the observation-age check with the persistent decay_state flags.
+    stale_trend_canonicals = sorted(set(stale_trend_canonicals) | decay_flagged)
 
     return ResearchBrief(
         project_id=project_id,
@@ -249,7 +256,7 @@ def build_brief(db: Session, project_id: int) -> ResearchBrief:
         dismissed_canonicals=sorted(set(dismissed)),
         dismissed_reasons=dismissed_reasons,
         low_confidence_entities=low_confidence[:MAX_RECENT_TRENDS],
-        stale_trend_canonicals=sorted(set(stale_trend_canonicals)),
+        stale_trend_canonicals=stale_trend_canonicals,
         built_at=datetime.utcnow().isoformat() + "Z",
         stats={
             "n_competitors": len(known_competitors),

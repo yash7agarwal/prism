@@ -82,6 +82,8 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE knowledge_entities ADD COLUMN user_signal VARCHAR(20)"))
             if "dismissed_reason" not in existing_cols:
                 conn.execute(text("ALTER TABLE knowledge_entities ADD COLUMN dismissed_reason TEXT"))
+            if "decay_state" not in existing_cols:
+                conn.execute(text("ALTER TABLE knowledge_entities ADD COLUMN decay_state VARCHAR(30)"))
     if "agent_sessions" in inspector.get_table_names():
         existing_cols = {c["name"] for c in inspector.get_columns("agent_sessions")}
         with engine.begin() as conn:

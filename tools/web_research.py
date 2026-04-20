@@ -8,8 +8,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -17,6 +19,67 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+_SOURCE_AUTHORITY_PATH = Path(__file__).resolve().parent.parent / "config" / "source_authority.yaml"
+
+
+@lru_cache(maxsize=1)
+def _load_source_authority() -> dict[str, Any]:
+    """Load config/source_authority.yaml once. Returns empty dict on any failure."""
+    try:
+        import yaml
+        if not _SOURCE_AUTHORITY_PATH.exists():
+            return {}
+        with _SOURCE_AUTHORITY_PATH.open() as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception as exc:
+        logger.warning("[source_authority] load failed: %s — running without filtering", exc)
+        return {}
+    # Precompute a tier lookup: host → tier_index (lower = higher authority).
+    tier_of: dict[str, int] = {}
+    for idx, key in enumerate(("tier1_primary", "tier2_research", "tier3_trade"), start=1):
+        for host in cfg.get(key, []):
+            tier_of[host.lower()] = idx
+    cfg["_tier_of"] = tier_of
+    cfg["_blocklist"] = {h.lower() for h in cfg.get("blocklist", [])}
+    return cfg
+
+
+def _host_of(url: str) -> str:
+    try:
+        return (urlparse(url).netloc or "").lower()
+    except Exception:
+        return ""
+
+
+def is_blocklisted(url: str) -> bool:
+    """True if the URL's host (or any path-prefixed entry) matches the blocklist."""
+    cfg = _load_source_authority()
+    blocklist = cfg.get("_blocklist", set())
+    if not blocklist:
+        return False
+    host = _host_of(url)
+    if host in blocklist:
+        return True
+    # Support entries like "www.linkedin.com/pulse" that include a path prefix.
+    for bl in blocklist:
+        if "/" in bl and url.lower().find(bl) != -1:
+            return True
+    return False
+
+
+def source_tier(url: str) -> int:
+    """Return 1..4 — 1 is most authoritative. 4 is 'general web'."""
+    cfg = _load_source_authority()
+    host = _host_of(url)
+    tier_of = cfg.get("_tier_of", {})
+    if host in tier_of:
+        return tier_of[host]
+    # Suffix match to catch subdomains of listed hosts.
+    for h, t in tier_of.items():
+        if host.endswith("." + h) or host == h:
+            return t
+    return 4
 
 _USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
@@ -42,27 +105,52 @@ class WebResearcher:
     # ------------------------------------------------------------------
 
     def search(self, query: str, max_results: int = 10) -> list[dict]:
-        """Run a web search. Tries Tavily → Brave → DuckDuckGo lite."""
+        """Run a web search. Tries Tavily → Brave → DuckDuckGo lite.
+
+        Post-processes every provider's results with the shared source-authority
+        config: blocklisted hosts are dropped, each result gets a `tier` field
+        (1 = most authoritative), and results are sorted tier-ascending so
+        downstream consumers that slice [:N] get the strongest sources first.
+        Over-fetches slightly (+5) so the blocklist doesn't starve max_results.
+        """
+        fetch_n = max_results + 5
+        raw: list[dict] = []
 
         if self._tavily_key:
             try:
-                return self._search_tavily(query, max_results)
+                raw = self._search_tavily(query, fetch_n)
             except Exception as exc:
                 logger.warning("Tavily search failed: %s", exc)
 
-        if self._brave_key:
+        if not raw and self._brave_key:
             try:
-                return self._search_brave(query, max_results)
+                raw = self._search_brave(query, fetch_n)
             except Exception as exc:
                 logger.warning("Brave search failed: %s", exc)
 
-        try:
-            return self._search_ddg(query, max_results)
-        except Exception as exc:
-            logger.warning("DuckDuckGo search failed: %s", exc)
+        if not raw:
+            try:
+                raw = self._search_ddg(query, fetch_n)
+            except Exception as exc:
+                logger.warning("DuckDuckGo search failed: %s", exc)
 
-        logger.warning("All search providers failed for query: %s", query)
-        return []
+        if not raw:
+            logger.warning("All search providers failed for query: %s", query)
+            return []
+
+        return self._rank_by_authority(raw, max_results)
+
+    @staticmethod
+    def _rank_by_authority(results: list[dict], max_results: int) -> list[dict]:
+        filtered = []
+        for r in results:
+            url = r.get("url") or ""
+            if not url or is_blocklisted(url):
+                continue
+            r["tier"] = source_tier(url)
+            filtered.append(r)
+        filtered.sort(key=lambda r: r["tier"])
+        return filtered[:max_results]
 
     # -- Tavily --
 

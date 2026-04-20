@@ -207,6 +207,21 @@ def research_industry_trends(
                     "query_kind": pq.kind,
                 })
 
+    # Feature-flagged alt retrievers (RSS / Reddit). No-op when PRISM_RETRIEVERS
+    # isn't set; additive to the web-search bundle when it is.
+    try:
+        from tools import rss_retriever
+        for r in rss_retriever.fetch_for_plan(plan.inferred_industry):
+            raw_data.append({**r, "query": r.get("feed", "rss"), "query_kind": "discovery"})
+    except Exception as exc:
+        logger.warning("[researcher] RSS retrieval failed: %s", exc)
+    try:
+        from tools import reddit_retriever
+        for r in reddit_retriever.fetch_for_plan(plan.inferred_industry):
+            raw_data.append({**r, "query": r.get("subreddit", "reddit"), "query_kind": "lateral"})
+    except Exception as exc:
+        logger.warning("[researcher] Reddit retrieval failed: %s", exc)
+
     if not raw_data:
         return {
             "trends": [],

@@ -1,0 +1,33 @@
+# Subreddits per industry bucket. Used by tools/reddit_retriever.py when
+# PRISM_RETRIEVERS contains "reddit". Planner's `inferred_industry` matches
+# against the keys (exact → substring → general fallback).
+
+food_delivery:
+  - "IndiaInvestments"
+  - "indianstartups"
+  - "developersIndia"
+
+quick_commerce:
+  - "indianstartups"
+  - "IndiaInvestments"
+
+online_travel_agency:
+  - "travel"
+  - "solotravel"
+  - "indiatravel"
+
+hospitality:
+  - "AirBnB"
+  - "travel"
+
+fintech:
+  - "IndiaInvestments"
+  - "indianstartups"
+
+saas:
+  - "SaaS"
+  - "startups"
+
+general:
+  - "indianstartups"
+  - "IndiaInvestments"

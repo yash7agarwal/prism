@@ -11,6 +11,10 @@ import {
   Globe,
   CaretDown,
   CaretUp,
+  ThumbsUp,
+  X as XIcon,
+  Star,
+  Trash,
 } from '@phosphor-icons/react'
 import { api } from '@/lib/api'
 
@@ -35,6 +39,9 @@ interface Trend {
   description: string
   timeline: 'past' | 'present' | 'emerging' | 'future'
   category: string
+  confidence?: number
+  user_signal?: 'kept' | 'dismissed' | 'starred' | null
+  dismissed_reason?: string | null
   quantification: Record<string, string>
   observations: Observation[]
   adoption: Adoption[]
@@ -73,12 +80,48 @@ function adoptionIcon(level: string) {
   return <span className="inline-block w-2.5 h-2.5 rounded-full bg-zinc-600" />
 }
 
-function TrendCard({ trend }: { trend: Trend }) {
+function TrendCard({ trend, onRemove, onUpdate }: {
+  trend: Trend
+  onRemove: (id: number) => void
+  onUpdate: (id: number, patch: Partial<Trend>) => void
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [busy, setBusy] = useState<null | 'keep' | 'dismiss' | 'star' | 'purge'>(null)
   const quantKeys = Object.keys(trend.quantification || {})
 
+  async function sendSignal(signal: 'kept' | 'dismissed' | 'starred') {
+    const key = signal === 'kept' ? 'keep' : signal === 'dismissed' ? 'dismiss' : 'star'
+    setBusy(key)
+    try {
+      await api.setEntitySignal(trend.id, signal)
+      if (signal === 'dismissed') {
+        onRemove(trend.id)   // matches backend filter — dismissed hidden from view
+      } else {
+        onUpdate(trend.id, { user_signal: signal })
+      }
+    } catch (_err) {
+      setBusy(null)
+    }
+  }
+
+  async function purge() {
+    if (!confirm(`Purge "${trend.name}"? This cascade-deletes its observations and queues a fresh research run.`)) return
+    setBusy('purge')
+    try {
+      await api.purgeEntity(trend.id)
+      onRemove(trend.id)
+    } catch (_err) {
+      setBusy(null)
+    }
+  }
+
+  const starred = trend.user_signal === 'starred'
+  const kept = trend.user_signal === 'kept'
+
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors min-w-[320px] max-w-[400px] flex-shrink-0">
+    <div className={`bg-zinc-900/80 border rounded-xl p-4 transition-colors min-w-[320px] max-w-[400px] flex-shrink-0 ${
+      starred ? 'border-amber-500/60' : 'border-zinc-800 hover:border-zinc-700'
+    }`}>
       <div className="flex items-start justify-between gap-2 mb-2">
         {categoryBadge(trend.category)}
         <span className="text-[11px] text-zinc-500 font-mono">{trend.observation_count} obs</span>
@@ -140,6 +183,52 @@ function TrendCard({ trend }: { trend: Trend }) {
           ))}
         </div>
       )}
+
+      {/* Feedback row — same signals as Telegram digest. Starred highlights the
+          card border; Dismiss removes it from the view and lets the planner
+          avoid this pattern next run. Purge is destructive-plus-rerun. */}
+      <div className="mt-3 border-t border-zinc-800 pt-3 flex items-center gap-1.5">
+        <button
+          onClick={() => sendSignal('kept')}
+          disabled={busy !== null}
+          title="Keep — marks this as useful, weights similar patterns up"
+          className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md transition-colors ${
+            kept ? 'bg-emerald-500/20 text-emerald-300' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+          } disabled:opacity-40`}
+        >
+          <ThumbsUp size={12} weight={kept ? 'fill' : 'regular'} />
+          {busy === 'keep' ? '…' : 'Keep'}
+        </button>
+        <button
+          onClick={() => sendSignal('dismissed')}
+          disabled={busy !== null}
+          title="Dismiss — hides this and feeds it back as a negative example"
+          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors disabled:opacity-40"
+        >
+          <XIcon size={12} />
+          {busy === 'dismiss' ? '…' : 'Dismiss'}
+        </button>
+        <button
+          onClick={() => sendSignal('starred')}
+          disabled={busy !== null}
+          title="Star — prioritises this pattern in the next research brief"
+          className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md transition-colors ${
+            starred ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+          } disabled:opacity-40`}
+        >
+          <Star size={12} weight={starred ? 'fill' : 'regular'} />
+          {busy === 'star' ? '…' : 'Star'}
+        </button>
+        <button
+          onClick={purge}
+          disabled={busy !== null}
+          title="Purge & re-research — for mis-tagged entries. Deletes observations, queues a fresh run, blocks re-learning."
+          className="ml-auto flex items-center gap-1 text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:bg-red-500/10 hover:text-red-400 transition-colors disabled:opacity-40"
+        >
+          <Trash size={12} />
+          {busy === 'purge' ? '…' : 'Purge'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -159,6 +248,10 @@ export default function TrendsPage({ params }: { params: { id: string } }) {
     })
     return () => { cancelled = true }
   }, [projectId])
+
+  const removeTrend = (id: number) => setTrends(curr => curr.filter(t => t.id !== id))
+  const patchTrend = (id: number, patch: Partial<Trend>) =>
+    setTrends(curr => curr.map(t => (t.id === id ? { ...t, ...patch } : t)))
 
   const filtered = filter === 'all' ? trends : trends.filter(t => t.category === filter)
 
@@ -241,7 +334,12 @@ export default function TrendsPage({ params }: { params: { id: string } }) {
               ) : (
                 <div className="flex gap-4 overflow-x-auto pb-2 -mx-2 px-2 scrollbar-thin scrollbar-thumb-zinc-800">
                   {sectionTrends.map(trend => (
-                    <TrendCard key={trend.id} trend={trend} />
+                    <TrendCard
+                      key={trend.id}
+                      trend={trend}
+                      onRemove={removeTrend}
+                      onUpdate={patchTrend}
+                    />
                   ))}
                 </div>
               )}

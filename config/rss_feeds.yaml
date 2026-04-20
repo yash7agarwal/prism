@@ -1,0 +1,35 @@
+# RSS/Atom feeds grouped by industry inference.
+#
+# Consumed by tools/rss_retriever.py when PRISM_RETRIEVERS contains "rss".
+# The planner's `inferred_industry` string is matched against the top-level
+# keys here (exact → substring → fall-through to `general`).
+#
+# Keep lists short and high-signal. One garbage feed poisons every run of
+# that vertical — prefer analyst/trade press over general news.
+
+food_delivery:
+  - "https://inc42.com/feed/"
+  - "https://entrackr.com/feed/"
+
+quick_commerce:
+  - "https://inc42.com/feed/"
+  - "https://entrackr.com/feed/"
+
+online_travel_agency:
+  - "https://skift.com/feed/"
+  - "https://www.phocuswire.com/rss/articles"
+
+hospitality:
+  - "https://skift.com/feed/"
+
+fintech:
+  - "https://entrackr.com/feed/"
+  - "https://inc42.com/feed/"
+
+saas:
+  - "https://techcrunch.com/feed/"
+  - "https://www.theverge.com/rss/index.xml"
+
+general:
+  - "https://techcrunch.com/feed/"
+  - "https://www.restofworld.org/feed/"

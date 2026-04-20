@@ -146,6 +146,10 @@ class KnowledgeEntity(Base):
     user_signal: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Optional "why" a user dismissed this entity (free-text, captured via UI or Telegram).
     dismissed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Decay state: "fresh" | "needs_revalidation" — set by agent/decay.py when the
+    # entity's most-recent observation is older than DECAY_DAYS. The research
+    # brief surfaces `needs_revalidation` canonicals as validation targets.
+    decay_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     observations: Mapped[list["KnowledgeObservation"]] = relationship(
         back_populates="entity", cascade="all, delete-orphan"
@@ -333,6 +337,45 @@ class AgentSession(Base):
     # novelty_yield, quantification_ratio, confidence_distribution, dropped_for_invalid_source.
     # Powers regression detection and the planner feedback loop.
     quality_score_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class CrossProjectHypothesis(Base):
+    """Suggested-but-not-applied trend from one project into another.
+
+    Prevents the v0.11.0 contamination class by keeping cross-project transfer
+    human-gated: a high-signal trend found in project A surfaces here as a
+    suggestion for project B when their inferred industries overlap. Status
+    transitions via the accept / reject endpoints; only `accepted` ever
+    promotes the entity into the target project's KG.
+    """
+    __tablename__ = "cross_project_hypotheses"
+    __table_args__ = (
+        Index("ix_xproj_hypo_target_status", "target_project_id", "status"),
+        UniqueConstraint(
+            "source_entity_id", "target_project_id",
+            name="uq_xproj_hypo_source_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE")
+    )
+    target_project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE")
+    )
+    source_entity_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_entities.id", ondelete="CASCADE")
+    )
+    # Snapshot at suggestion time — protects against source entity mutation.
+    source_entity_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    source_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    similarity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # suggested | accepted | rejected
+    status: Mapped[str] = mapped_column(String(20), default="suggested")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class KnowledgeEmbedding(Base):

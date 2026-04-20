@@ -157,6 +157,36 @@ class KnowledgeStore:
                     )
                     existing = best_match
 
+        # Embedding layer (P2) — cosine top-K against stored vectors. Gracefully
+        # no-ops when the provider is unavailable or no candidates have embeddings.
+        # Only considered when cheaper layers missed.
+        used_embedding_match = False
+        if existing is None:
+            from agent import semantic_dedupe
+            comparison_text = f"{name}\n{description or ''}"
+            best = semantic_dedupe.find_best_match(
+                self.db, self.project_id, entity_type, comparison_text,
+            )
+            if best is not None:
+                if best.score >= semantic_dedupe.AUTO_MERGE_THRESHOLD:
+                    existing = self.db.get(KnowledgeEntity, best.entity_id)
+                    used_embedding_match = True
+                    logger.info(
+                        "[knowledge_store] Embedding dedupe merged '%s' -> id=%d %r (cos=%.3f)",
+                        name, existing.id, existing.name, best.score,
+                    )
+                elif best.score >= semantic_dedupe.AMBIGUOUS_LO:
+                    candidate = self.db.get(KnowledgeEntity, best.entity_id)
+                    if candidate is not None and semantic_dedupe.llm_tie_breaker(
+                        name, description or "", candidate.name, candidate.description or "",
+                    ):
+                        existing = candidate
+                        used_embedding_match = True
+                        logger.info(
+                            "[knowledge_store] LLM tie-breaker merged '%s' -> id=%d %r (cos=%.3f)",
+                            name, existing.id, existing.name, best.score,
+                        )
+
         if existing:
             if description is not None:
                 existing.description = description
@@ -204,6 +234,14 @@ class KnowledgeStore:
             )
             return winner.id
         self.db.refresh(entity)
+        # If the embedding layer ran (provider available) but no match crossed
+        # the merge threshold, persist the freshly-computed vector on the new
+        # entity so the next dedupe round has material to compare against.
+        try:
+            from agent import semantic_dedupe
+            semantic_dedupe.store_new_embedding(self.db, entity.id)
+        except Exception as exc:
+            logger.debug("[knowledge_store] embedding persist skipped: %s", exc)
         logger.debug(f"Created entity {entity.id}: {name}")
         return entity.id
 

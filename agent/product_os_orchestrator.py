@@ -298,17 +298,23 @@ class ProductOSOrchestrator:
         logger.info("[orchestrator] Daemon stopped")
 
     def _run_regression_check(self) -> None:
-        """F2: run quality-regression check across all projects.
+        """F2 + P2-decay: daily housekeeping.
 
-        Fires once per 24h from the daemon tick. Delivers alerts via
-        Telegram for any project whose 7-day retrieval_yield or
-        novelty_yield dropped >30% vs the prior 7 days.
+        Fires once per 24h from the daemon tick. Runs:
+          - Quality-regression check across all projects (Telegram alerts).
+          - Decay sweep across all projects (flags trends >60d without new
+            observations so the next planner run targets them for validation).
         """
         try:
             from agent.quality_regression import run_once
             run_once()
         except Exception as exc:
             logger.error("[orchestrator] regression check failed: %s", exc, exc_info=True)
+        try:
+            from agent.decay import sweep_once
+            sweep_once()
+        except Exception as exc:
+            logger.error("[orchestrator] decay sweep failed: %s", exc, exc_info=True)
 
     def start_daemon(self) -> None:
         """Start the daemon in a background thread."""

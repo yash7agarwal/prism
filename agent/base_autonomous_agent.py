@@ -273,6 +273,14 @@ class AutonomousAgent(ABC):
             except Exception as exc:
                 logger.info("[%s] digest send skipped: %s", self.agent_type, exc)
 
+            # P3 — extract the planner queries into memory/patterns.md when
+            # the session cleared the quality bar. Deterministic, no LLM.
+            try:
+                from agent.pattern_writer import record_if_successful
+                record_if_successful(self.db, session)
+            except Exception as exc:
+                logger.info("[%s] pattern extraction skipped: %s", self.agent_type, exc)
+
         logger.info(f"[{self.agent_type}] Session {session.id} complete: {summary}")
 
         return {

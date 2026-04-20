@@ -192,6 +192,23 @@ export const api = {
   trendsView: (projectId: number) =>
     request<any>(`/api/knowledge/trends-view?project_id=${projectId}`),
 
+  // User feedback signal on an entity — drives the compounding loop.
+  // `signal` ∈ {"kept", "dismissed", "starred", "clear"}.
+  setEntitySignal: (id: number, signal: string, reason?: string) =>
+    request<KnowledgeEntity>(`/api/knowledge/entities/${id}/signal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signal, reason }),
+    }),
+
+  // Soft-purge a mis-tagged trend: tombstones + enqueues re-research.
+  purgeEntity: (id: number, reason?: string) =>
+    request<any>(`/api/knowledge/entities/${id}/purge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signal: 'dismissed', reason: reason || '[purged via UI]' }),
+    }),
+
   // Impact graph
   impactGraph: (projectId: number) =>
     request<any>(`/api/knowledge/impact-graph?project_id=${projectId}`),
