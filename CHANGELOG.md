@@ -2,6 +2,12 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.13.2] — 2026-04-20 — Per-service ENTRYPOINT dispatch
+
+### Fixed
+- The first Railway deploy attempt ran the Telegram bot on both services because `RAILWAY_RUN_COMMAND` isn't actually an honored Railway variable — the Dockerfile CMD wins. Two simultaneous pollers hit Telegram's 409 conflict, api container crashed, public URL 502'd.
+- `docker-entrypoint.sh` now dispatches on `SERVICE_TYPE`: `api` → `uvicorn webapp.api.main:app --host 0.0.0.0 --port $PORT`, `bot` (default) → `python -m telegram_bot.run_bot`. Set `SERVICE_TYPE=api` on `prism-api` and `SERVICE_TYPE=bot` on `prism-bot` in Railway Variables.
+
 ## [0.13.1] — 2026-04-20 — Railway-ready Dockerfile
 
 ### Changed

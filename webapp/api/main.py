@@ -31,7 +31,7 @@ logging.basicConfig(
 app = FastAPI(
     title="Prism API",
     description="Product intelligence platform — competitive research, trends, impacts. UAT lives in Loupe.",
-    version="0.13.1",
+    version="0.13.2",
 )
 
 app.add_middleware(

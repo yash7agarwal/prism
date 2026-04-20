@@ -25,5 +25,9 @@ RUN mkdir -p memory .tmp/evidence webapp/data/screenshots
 
 ENV PYTHONPATH=/app
 
-# Default to the bot; Railway overrides per-service via RAILWAY_RUN_COMMAND.
-CMD ["python", "-m", "telegram_bot.run_bot"]
+# Service dispatch via env var — each Railway service sets SERVICE_TYPE:
+#   prism-api → SERVICE_TYPE=api  (uvicorn)
+#   prism-bot → SERVICE_TYPE=bot  (telegram polling)
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
