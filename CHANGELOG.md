@@ -2,6 +2,21 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.14.1] — 2026-04-20 — Postgres live + cleaner Vercel URL
+
+### Deployed
+- **Postgres cutover complete**: Railway Postgres attached, `DATABASE_URL` wired into `prism-api`, data migrated. All 15 tables matched source row-for-row (3 projects · 169 entities · 273 observations · 108 sessions · 2884 test_cases).
+- **Cleaner Vercel alias**: `https://prism-intel.vercel.app` now points at the same deploy as the verbose `prism-y4shagarwal-3895s-projects.vercel.app`.
+
+### Changed
+- `webapp/api/main.py` CORS `allow_origins` includes `prism-intel.vercel.app` + `prism-three-alpha.vercel.app` (Vercel's auto-assigned short alias) so the frontend can call the API from either URL.
+
+### Fixed
+- `tools/migrate_sqlite_to_postgres.py` — three successive bugs discovered while running the live migration, all fixed:
+  - Single-row executemany → Postgres COPY FROM STDIN (~100x faster over the Railway TCP proxy; killed a 7-min stuck run).
+  - `csv.writer(escapechar='\\')` was mangling the `\N` NULL marker so Postgres rejected integer columns. Replaced with manual TSV escaping.
+  - Bytes columns (KnowledgeEmbedding.embedding_blob) needed `\x<hex>` bytea literal, not `str(bytes_value)`.
+
 ## [0.14.0] — 2026-04-20 — Dual-mode DB (Postgres-ready)
 
 ### Added

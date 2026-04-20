@@ -31,7 +31,7 @@ logging.basicConfig(
 app = FastAPI(
     title="Prism API",
     description="Product intelligence platform — competitive research, trends, impacts. UAT lives in Loupe.",
-    version="0.14.0",
+    version="0.14.1",
 )
 
 # CORS — locals for dev, Vercel + is-a.dev for prod. Extra comma-separated
@@ -42,6 +42,8 @@ _default_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "https://prism.is-a.dev",
+    "https://prism-intel.vercel.app",
+    "https://prism-three-alpha.vercel.app",
 ]
 _extra_origins = [o.strip() for o in (_os.environ.get("CORS_ALLOW_ORIGINS") or "").split(",") if o.strip()]
 app.add_middleware(

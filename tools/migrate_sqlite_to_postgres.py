@@ -84,19 +84,84 @@ def _rows_of(engine, table: str) -> list[dict]:
 
 
 def _insert_rows(engine, table: str, rows: list[dict]) -> int:
+    """Bulk-insert `rows` into `table`. Uses Postgres COPY over a slow TCP
+    proxy (single round-trip for the whole table), falls back to plain
+    executemany on SQLite or other dialects."""
     if not rows:
         return 0
     insp = inspect(engine)
-    target_cols = {c["name"] for c in insp.get_columns(table)}
-    # Only pass columns that exist on the target (schema may differ slightly).
-    clean_rows = [{k: v for k, v in row.items() if k in target_cols} for row in rows]
+    target_cols = [c["name"] for c in insp.get_columns(table)]
+    target_set = set(target_cols)
+    clean_rows = [{k: row.get(k) for k in target_cols if k in target_set and k in row} for row in rows]
+    if not clean_rows or not clean_rows[0]:
+        return 0
     cols = list(clean_rows[0].keys())
+
+    if engine.dialect.name == "postgresql":
+        return _copy_rows_postgres(engine, table, cols, clean_rows)
+
+    # SQLite / other — executemany via a single round-trip is fine.
     placeholders = ", ".join(f":{c}" for c in cols)
     stmt = text(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})")
     with engine.begin() as conn:
-        for row in clean_rows:
-            conn.execute(stmt, row)
+        conn.execute(stmt, clean_rows)
     return len(clean_rows)
+
+
+def _copy_rows_postgres(engine, table: str, cols: list[str], rows: list[dict]) -> int:
+    """Use psycopg2's COPY FROM STDIN for one-round-trip bulk load.
+
+    Serialises each row to Postgres's text COPY format manually (the csv
+    module's escapechar would mangle the `\\N` NULL marker, which Postgres
+    then rejects for non-text columns). Suspends FK enforcement for the
+    load — orphan rows exist in the source SQLite.
+    """
+    import io
+    import json as _json
+
+    def _escape_cell(v) -> str:
+        # Postgres COPY text format: NULL → literal `\N`; backslash, tab,
+        # newline, carriage-return must be escaped. Everything else is raw.
+        if v is None:
+            return r"\N"
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            # Postgres bytea literal: \x<hex> — pass through unchanged after
+            # we escape the leading backslash via the pipeline below.
+            return r"\\x" + bytes(v).hex()
+        if isinstance(v, (dict, list)):
+            s = _json.dumps(v, default=str)
+        elif isinstance(v, bool):
+            s = "t" if v else "f"
+        else:
+            s = str(v)
+        return (
+            s.replace("\\", r"\\")
+             .replace("\t", r"\t")
+             .replace("\n", r"\n")
+             .replace("\r", r"\r")
+        )
+
+    buf = io.StringIO()
+    for row in rows:
+        buf.write("\t".join(_escape_cell(row.get(c)) for c in cols))
+        buf.write("\n")
+    buf.seek(0)
+
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute("SET session_replication_role = 'replica'")
+        col_list = ", ".join(f'"{c}"' for c in cols)
+        copy_sql = (
+            f"COPY {table} ({col_list}) FROM STDIN "
+            "WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')"
+        )
+        cur.copy_expert(copy_sql, buf)
+        cur.execute("SET session_replication_role = 'origin'")
+        raw.commit()
+    finally:
+        raw.close()
+    return len(rows)
 
 
 def _truncate(engine, table: str) -> None:
