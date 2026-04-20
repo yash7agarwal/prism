@@ -2,6 +2,11 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.13.3] — 2026-04-20 — Add python-multipart so FastAPI Form routes load
+
+### Fixed
+- `requirements.txt` was missing `python-multipart`, which FastAPI now requires at import time for any route that declares `Form()` or `UploadFile`. The v0.13.2 image built cleanly but crashed the API at route registration with a `RuntimeError` before serving a single request. Fixed by adding `python-multipart>=0.0.9` to the manifest. First live Railway deploy confirmed after this landed — `/api/health` on `prism-api-production-18bf.up.railway.app` returns `{"status":"ok"}`.
+
 ## [0.13.2] — 2026-04-20 — Per-service ENTRYPOINT dispatch
 
 ### Fixed
