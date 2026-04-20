@@ -2,6 +2,16 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.13.4] — 2026-04-20 — CORS for Vercel frontend + is-a.dev
+
+### Added
+- CORS allow-list expanded: `prism.is-a.dev` (pending PR #36711) + Vercel production alias via regex `prism(-<hash>)?-y4shagarwal-3895s-projects.vercel.app` so every immutable deploy URL is accepted without per-deploy edits.
+- `CORS_ALLOW_ORIGINS` env var — comma-separated extra origins for ad-hoc previews without code changes.
+
+### Deployed
+- **Vercel (webapp/web)**: https://prism-y4shagarwal-3895s-projects.vercel.app — Next.js frontend, free hobby tier, `NEXT_PUBLIC_API_URL` points at Railway. Deployment Protection disabled so the URL is publicly reachable.
+- **is-a.dev PR**: https://github.com/is-a-dev/register/pull/36711 claims `prism.is-a.dev` → CNAME → Railway API URL. Pending maintainer merge.
+
 ## [0.13.3] — 2026-04-20 — Add python-multipart so FastAPI Form routes load
 
 ### Fixed
