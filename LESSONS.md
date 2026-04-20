@@ -18,6 +18,8 @@
 | 2026-04-19 | v0.10.0 | **Pivot**: UAT carved into sibling repo Loupe |
 | 2026-04-19 | v0.10.1–0.10.5 | DB hardening, cost telemetry, merged intel agent, quality review, digest push |
 | 2026-04-20 | v0.11.0 | **Pivot**: Hardcoded research seeds → typed brief + LLM-planned queries; Claude Sonnet becomes synthesis default |
+| 2026-04-20 | v0.12.x | F2 quality-regression alert · F3 purge-and-rerun · competitor obs-leak fix · Railway deploy prep |
+| 2026-04-20 | v0.13.0 | **Phase 2 + 3 complete**: decay, source authority, embedding dedupe, cross-project queue, RSS/Reddit, trends feedback UI |
 
 ---
 
@@ -470,6 +472,74 @@ Supporting schema changes (via idempotent ALTER TABLE in `db.init_db`, not Alemb
 5. **Schema migrations via idempotent ALTER TABLE beat Alembic for single-user apps.** This project has used `db.init_db()` lightweight migrations since v0.10.1 and added three more columns in v0.11.0 with zero ceremony. Alembic would have meant a new dev dependency, a `migrations/` dir, a `alembic upgrade head` in deployment, and human attention on each schema change. None of that pays off below ~10 engineers.
 
 6. **Side-wins matter — note them.** Two unrelated bugs surfaced while doing this work: (a) `datetime.utcnow()` was serialized without a `Z` suffix, causing all "last ran" timestamps to render 5.5h stale in IST (fixed by a `UTCDatetime` PlainSerializer in Pydantic); (b) `utils/gemini_client.ask_with_tools` schema converter flattened nested-object array items to STRING, silently corrupting any multi-field tool call (fixed by recursive schema conversion). Both were found *because* v0.11.0 was actively exercising the Gemini fallback and the timestamp rendering. Fixing them in the same release was free; deferring would have been a regression trap.
+
+---
+
+## Chapter 9: Closing out the Roadmap — Phase 2 + 3 (v0.13.0, April 20)
+
+### What happened
+
+After v0.11.0 established the research-architecture spine and v0.12.x closed the loop with feedback signals + deploy prep, v0.13.0 shipped all remaining items from `/Users/yash/.claude/plans/polished-hatching-bubble.md` in a single coordinated release. Seven new Python modules, one new DB table, one new config family, frontend parity with the Telegram digest.
+
+### Tradeoff register
+
+**Decision 9.1: Embedding dedupe via Gemini text-embedding-004, not sentence-transformers.**
+- **Gained:** Zero new heavy dependencies (no PyTorch, no 200 MB local model weights); 768-dim vectors; free tier; already wired through `GEMINI_API_KEY`. Stored as raw float32 bytes in the existing `KnowledgeEmbedding` table — no new schema. Works out of the box on Railway without layer-size explosion.
+- **Lost:** Every entity upsert under active provider incurs a ~200 ms embed round-trip. If Gemini is rate-limited the layer silently no-ops, which means the KG fragments quietly during outages (the trigram layer still catches the obvious cases). Embeddings don't capture pure exact-name polish — "Zepto" vs "Zeppto" (typo) would still trigger the trigram layer, not the embedding layer.
+- **Net:** Right call for a solo-PM tool at ≤1K entities/project. If scale grows past ~10K entities, move to pgvector + cached embeddings to kill both the per-upsert latency and the quota risk. Until then, the graceful fallback is the right default — no upsert ever blocks on a provider.
+
+**Decision 9.2: LLM tie-breaker only in the 0.78–0.90 cosine band.**
+- **Gained:** Costs only the uncertain cases. At typical agent run rates, ambiguous-band hits happen maybe 2–5 times per 50 entities, so the Haiku bill is cents per run. Non-ambiguous pairs auto-merge (≥0.90) or stay distinct (<0.78) without any LLM load.
+- **Lost:** The thresholds are guesses. A band that's too wide wastes LLM calls on obvious-merges and obvious-distincts; a band that's too narrow lets subtle dupes through. These numbers came from reading papers on sentence-embedding similarity distributions, not from our data. We haven't measured the actual distribution on the Prism KG yet — if it turns out most pairs score 0.80–0.92 naturally, the band needs to be re-tuned or the tie-breaker will swamp us.
+- **Net:** Correct default. Re-visit once we have a week of production dedupe data; retune bands from observed distribution. Default-to-DIFFERENT on LLM failure is conservative and correct.
+
+**Decision 9.3: Cross-project transfer is human-gated, always.**
+- **Gained:** Can never auto-contaminate the way v0.11.0's hardcoded travel seeds did. Every cross-project suggestion sits in `CrossProjectHypothesis` with `status='suggested'` until a human accepts or rejects. Accept explicitly clones the entity at `confidence=0.4` (well below the 0.5 threshold our synthesiser uses for high-confidence claims) forcing the target project's next run to re-validate with its own retrieval before the KG treats the concept as established.
+- **Lost:** Cross-project compounding is slower. A trend discovered in Swiggy doesn't automatically sharpen Zomato-next project's queries until the user acks it. If the user never looks at the suggestion queue, the cross-project learning signal rots unread.
+- **Net:** The right asymmetry. Auto-wiring is the class of change that's impossibly expensive to unwind once it corrupts the KG; manual review is cheap to decide is "not worth it later" and remove. Build the queue, surface it in the Telegram bot or trends page later when cross-project volume warrants the UX.
+
+**Decision 9.4: RSS + Reddit behind a feature flag, not on by default.**
+- **Gained:** Production runs stay predictable — only web search runs without the flag, and its provider cascade is well-understood. When the user opts in via `PRISM_RETRIEVERS`, the alt sources join the bundle and pass through the same source_url validator + synthesis path, so there's no separate code path to maintain. Reddit in particular surfaces niche conversation that web search ranks poorly (r/indianstartups is where gig-economy changes get discussed before the trade press catches up).
+- **Lost:** The default experience is still web-only; a PM who doesn't read the docs won't know they can unlock Reddit + RSS. There's also a quality risk — Reddit posts can be marketing-driven, and the min-upvotes filter (10) is a blunt instrument. Early runs may pull viral-but-irrelevant posts.
+- **Net:** Right for v0.13. Flip the default once quality-score telemetry says Reddit-sourced observations keep pace with web-sourced ones across 3+ projects. Until then, opt-in.
+
+**Decision 9.5: `memory/patterns.md` grows by append-only session snapshots.**
+- **Gained:** Zero-risk writer — never edits prior content, idempotent on session id, gracefully skips low-quality sessions. Humans can read chronologically which research shapes worked for which industries. The planner can't directly consume this file (no auto-injection into the brief), but reading it post-hoc is useful for tuning the planner system prompt.
+- **Lost:** No automated reuse loop. The patterns don't feed back into future planner calls unless a human copies them into the system prompt or turns each into a config-driven seed. The original plan wanted "planner picks up successful templates automatically" — shipping that would require a pattern-retrieval step in the planner, which we deferred to keep scope tight.
+- **Net:** Correct staging. Human-readable chronicle first, automated retrieval once enough patterns accumulate to matter. Promote to auto-consumption in v0.14 if memory/patterns.md crosses ~50 entries.
+
+**Decision 9.6: Decay window = 60 days, not configurable.**
+- **Gained:** One number, one place. Easy to reason about.
+- **Lost:** Some trend types decay faster (regulatory changes become stale in weeks; demographic shifts stay fresh for quarters). A single window over-flags fast-movers and under-flags slow-movers.
+- **Net:** Good enough for v0.13. If the quality regression alerts start misfiring because "stale" trends are actually still accurate, introduce a per-category window map at that point. Don't build it pre-emptively.
+
+### Infrastructure stack (as of v0.13.0)
+
+| Layer | What's there now |
+|---|---|
+| **LLM synthesis** | Claude Sonnet 4.6 default · Gemini Flash Latest fallback · Groq Llama 3.3 70B via `PRISM_SYNTH_CHEAP=1` |
+| **LLM planning** | Claude Haiku 4.5 via `utils.claude_client.ask_with_tools` (Gemini fallback automatic) |
+| **LLM tie-breaker** | Claude Haiku 4.5 via `ask_fast`, gated on cosine band 0.78–0.90 |
+| **Embeddings** | Gemini text-embedding-004 (768 dim, float32 bytes in-DB) · graceful fallback on provider outage |
+| **Web retrieval** | Tavily → Brave → DuckDuckGo cascade + `source_authority.yaml` blocklist + tier ranking |
+| **Alt retrieval** | RSS + Reddit behind `PRISM_RETRIEVERS` flag · feed/sub maps in `config/` |
+| **Feedback loop** | Telegram inline buttons (F1) + trends-page buttons (this release) → `KnowledgeEntity.user_signal` → next `ResearchBrief.dismissed_canonicals`/`starred_canonicals` |
+| **Quality signal** | `AgentSession.quality_score_json` (validator, retrieval_yield, novelty_yield) → daily F2 alert |
+| **Decay** | `KnowledgeEntity.decay_state` sweep every 24h → brief validation targets |
+| **Cross-project** | `CrossProjectHypothesis` queue, human-gated |
+| **Deploy** | Railway (api + bot services, shared volume) prepped via `PRISM_AUTO_DAEMON` |
+
+### Key lessons
+
+1. **Ship phases in shape, not size.** Splitting v0.11 (spine), v0.12 (loop), v0.13 (polish) gave three natural points where "we could stop here and it'd still be an improvement" — every release was a local maximum. Compare to the alternative of one massive v0.11 that lands everything: higher risk that one rough edge blocks the rest.
+
+2. **Feature flags over feature branches.** RSS / Reddit / auto-daemon all landed on main behind env flags rather than waiting for their own release trains. Prod default stays boring; opt-in paths exist for when the user is ready. Zero merge overhead.
+
+3. **Graceful degradation makes provider outages irrelevant to code correctness.** Half this session was spent working under exhausted Claude credits + 429'd Gemini. The embedding layer, the tie-breaker, the digest delivery, the RSS fetch — each no-ops cleanly when its provider is gone. The code path is exercised; the outcome is diminished, not broken. This is worth the extra try/except ceremony.
+
+4. **Test via monkey-patch when providers are down.** The embedding-merge hot path was verified by stubbing `gemini_embeddings.embed` to return deterministic vectors. Waiting for Gemini's quota reset would have delayed this release by 12 hours. Monkey-patched tests prove code reachability + logic; live E2E tests prove providers + network + auth.
+
+5. **A "completed" roadmap is a temporary state.** Every LESSON in this doc opens up two new ones. v0.13 closes one plan; the next plan's seeds are already here — pattern auto-injection into the planner, per-category decay windows, embedding cache sharing across projects. The discipline is: know what's unfinished, resist shipping it into the same release.
 
 ---
 
