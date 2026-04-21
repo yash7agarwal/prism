@@ -215,6 +215,22 @@ class CrossProjectSuggestIn(BaseModel):
     similarity_score: float = 0.0
 
 
+class PRDGenerateIn(BaseModel):
+    """POST /api/prd/generate — kick off an async PRD synthesis for a feature."""
+    project_id: int
+    feature_description: str
+
+
+class PRDGenerateOut(BaseModel):
+    """Response shape for /api/prd/generate. The artifact content populates
+    asynchronously; clients poll /api/knowledge/artifacts/{id}."""
+    artifact_id: int
+    status: str  # "generating" | "done"
+    prism_evidence_count: int | None = None
+    loupe_evidence_available: bool | None = None
+    loupe_runs_matched: int | None = None
+
+
 class KnowledgeEntityDetail(KnowledgeEntityOut):
     observations: list["KnowledgeObservationOut"] = []
     relations: list["KnowledgeRelationOut"] = []

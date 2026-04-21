@@ -2,6 +2,22 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] — 2026-04-21 — Prism↔Loupe PRD bridge + metric-consistency guard
+
+### Added
+- `utils/loupe_client.py` — graceful HTTP client for Loupe's REST API. Returns empty evidence bundles when Loupe is unreachable so callers never wrap in try/except.
+- `agent/prd_synthesizer.py` — PRD/Insights synthesizer. Binds project ResearchBrief + Prism KG entities (fuzzy-matched by feature name) + Loupe UAT evidence → single Sonnet call → strict-shape Markdown. Saved as `KnowledgeArtifact(artifact_type='prd_doc')`.
+- `webapp/api/routes/prd.py` — `POST /api/prd/generate`, `GET /api/prd/recent`, `GET /api/prd/feature-candidates` endpoints.
+- **Telegram `/prd`**: with an arg (`/prd hotel rebooking`) → direct generation. Without an arg → inline keyboard of recent TestPlans ∪ starred trends (F1 from UX-friction plan). F2: every digest card now has a `[📝 Deep-dive (PRD)]` button that generates a PRD scoped to that trend.
+- `tests/test_stats_consistency.py` — invariant suite that asserts `stats.competitor_count == len(/competitors)`, `stats.entity_count == len(/entities)`, and related consistency checks across all projects. 22 tests pass against live Railway.
+- LESSONS.md chapters 10, 11, 12: deployment journey · Prism↔Loupe integration · the competitors-mismatch bug + metric-consistency principle.
+
+### Fixed
+- `/api/knowledge/competitors` used to require a `competes_with` `KnowledgeRelation` that not every discovery path created, while the project detail card counted raw `entity_type='company'` entities. Result: Intuit and Sarvam.ai showed "3 competitors" in stats but empty lists in the tab. Fixed by aligning `/competitors` on the same `entity_type='company'` filter — one source of truth.
+
+### Deployment notes
+- New env var: `LOUPE_API_URL` (default `http://localhost:8001`). Set it in `prism-api` on Railway once Loupe is deployed.
+
 ## [0.14.1] — 2026-04-20 — Postgres live + cleaner Vercel URL
 
 ### Deployed

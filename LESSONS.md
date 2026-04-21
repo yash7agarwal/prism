@@ -20,6 +20,10 @@
 | 2026-04-20 | v0.11.0 | **Pivot**: Hardcoded research seeds → typed brief + LLM-planned queries; Claude Sonnet becomes synthesis default |
 | 2026-04-20 | v0.12.x | F2 quality-regression alert · F3 purge-and-rerun · competitor obs-leak fix · Railway deploy prep |
 | 2026-04-20 | v0.13.0 | **Phase 2 + 3 complete**: decay, source authority, embedding dedupe, cross-project queue, RSS/Reddit, trends feedback UI |
+| 2026-04-20 | v0.13.1–.3 | Railway deploy live: Dockerfile reshape, SERVICE_TYPE dispatch, python-multipart hotfix |
+| 2026-04-20 | v0.13.4 | Vercel frontend live at prism-intel.vercel.app + CORS regex for per-deploy aliases |
+| 2026-04-20 | v0.14.0–.1 | **Pivot**: SQLite → Postgres on Railway; full history migrated via COPY FROM |
+| 2026-04-21 | v0.15.0 | Prism↔Loupe PRD synthesizer ships; competitors-mismatch bug fixed |
 
 ---
 
@@ -540,6 +544,123 @@ After v0.11.0 established the research-architecture spine and v0.12.x closed the
 4. **Test via monkey-patch when providers are down.** The embedding-merge hot path was verified by stubbing `gemini_embeddings.embed` to return deterministic vectors. Waiting for Gemini's quota reset would have delayed this release by 12 hours. Monkey-patched tests prove code reachability + logic; live E2E tests prove providers + network + auth.
 
 5. **A "completed" roadmap is a temporary state.** Every LESSON in this doc opens up two new ones. v0.13 closes one plan; the next plan's seeds are already here — pattern auto-injection into the planner, per-category decay windows, embedding cache sharing across projects. The discipline is: know what's unfinished, resist shipping it into the same release.
+
+---
+
+## Chapter 10: The deployment journey (v0.13.x–v0.14.x, April 20)
+
+### What happened
+
+Between v0.13.0 (Phase 2+3 of the research architecture) and v0.14.1 (Postgres live + Vercel + CORS), Prism went from "works on my laptop" to "works on the public internet under a stable domain, persisted in a managed database, with a separately-deployed frontend." Seven patch versions in one afternoon, each fixing a bug the previous one only found at runtime.
+
+### Tradeoff register
+
+**Decision 10.1: Two Railway services (api + bot) instead of one supervisor process.**
+- **Gained:** Per-service logs, per-service restart policies, clear ownership boundary. `prism-api` can crash without the bot going down, and vice versa. Future splits (separate worker, separate scheduler) are trivial from this starting point.
+- **Lost:** Two env-var sets to keep in sync (they're nearly identical). One extra service at the $5/mo tier line if usage grows. The internal `PRISM_API_URL=http://prism-api.railway.internal:$PORT` hop adds ~10ms per bot→api call.
+- **Net:** Right for the scale. Three-process supervisor scripts are where good systems go to die — better to let the platform do that job.
+
+**Decision 10.2: `RAILWAY_RUN_COMMAND` is not a real Railway variable; use an entrypoint shim instead.**
+- **Gained:** The Dockerfile's `CMD` + `ENTRYPOINT docker-entrypoint.sh` dispatching on `SERVICE_TYPE=api|bot` works identically on local Docker and Railway. Zero Railway-proprietary config in the image.
+- **Lost:** 12 lines of shell. Also ~30 minutes of runtime debugging (v0.13.1 → v0.13.2) to discover that assuming `RAILWAY_RUN_COMMAND` was honored (it isn't — I had read a blog post that was wrong) caused both services to boot as the bot and collide on Telegram's `getUpdates` polling.
+- **Net:** Correct. Platform-agnostic dispatch is always the right default. The lesson is: **never believe a claimed magic env var without verifying from primary docs or a test.**
+
+**Decision 10.3: `python-multipart` was missing from `requirements.txt`.**
+- **Gained:** Fast fix (one line) once identified.
+- **Lost:** v0.13.2's first Railway deploy looked healthy at the container level (build succeeded, process started) but FastAPI crashed at *route registration* because some endpoint declared `Form()` or `UploadFile`. The symptom was "container running, public URL 502" — which is the most confusing shape of failure.
+- **Net:** The lesson embedded in this: a clean build output is not a healthy app. The eval gate's "deployment check" must include a runtime `/health` probe, not just Docker-level success. Added to the gate template accordingly.
+
+**Decision 10.4: COPY FROM STDIN for the Postgres migration instead of SQLAlchemy executemany.**
+- **Gained:** 100× speedup over the public Railway TCP proxy. What took 7 minutes (stuck) with single-row inserts took 10 seconds with COPY. All 15 tables, 4100+ rows, source-to-target exact count match.
+- **Lost:** Three bugs discovered during the live run — (a) `csv.writer(escapechar='\\')` mangles the `\N` NULL marker so Postgres rejects integer columns; manual TSV escape required; (b) bytes columns need `\x<hex>` bytea literal, not `str(bytes_value)`; (c) orphaned test_cases rows existed in SQLite (FKs off by default) that Postgres refused — needed `session_replication_role = 'replica'` to suspend FK enforcement during load. Each surfaced as a traceback mid-migration; each cost a kill-and-rerun.
+- **Net:** Correct, and the test-then-iterate loop was cheap because the migration is re-entrant (truncate + load). The lesson: **bulk-load paths between databases with different integrity models will always need at least one escape valve for the strict side**. FK suspension, trigger disabling, constraint checks deferred — plan for it up front.
+
+**Decision 10.5: CORS `allow_origin_regex` for Vercel per-deploy aliases, not static allowlist.**
+- **Gained:** Every future Vercel preview deploy (branch previews, per-commit immutable URLs) is accepted without a Prism redeploy. One regex captures the naming scheme `prism(-<hash>)?-y4shagarwal-3895s-projects.vercel.app`.
+- **Lost:** Regex is less obvious than a static list; a future Vercel rename of the account/scope (`y4shagarwal-3895s-projects` → something else) silently breaks the regex. I also added explicit entries for `prism-intel.vercel.app` and `prism-three-alpha.vercel.app` because Vercel auto-assigned those aliases, which weren't captured by the regex.
+- **Net:** Right. A belt-and-braces mix of regex (per-deploy) + explicit list (aliases + future custom domains) covers both patterns.
+
+### Key lessons
+
+1. **Clean build ≠ healthy app.** Every deployment check must end with a runtime HTTP probe. Added to the post-task-eval template.
+2. **Don't trust undocumented magic env vars.** Verify by primary source or by test. `RAILWAY_RUN_COMMAND` cost 30 minutes.
+3. **Managed-Postgres migrations over TCP proxies need COPY, not executemany.** Always. Rule of thumb.
+4. **Cross-database FK models will bite you.** SQLite permits orphans; Postgres won't. Plan for `session_replication_role = replica` or equivalent before you migrate.
+5. **Deploy surfaces are plural.** "Deployed" means: container running + HTTP health green + routes respond 200 + env vars present + secrets not leaked in logs. Any one of those missing is a silent outage.
+
+---
+
+## Chapter 11: Prism ↔ Loupe — the PRD bridge (v0.15.0, April 21)
+
+### What happened
+
+Prism observes the market; Loupe verifies the build. They were carved intentionally as siblings in v0.10.0 with zero data exchange — a decision Ch.7 defended. Six weeks later, the question reopened: PMs need a single document that combines "what the market does" (Prism) with "what we built" (Loupe), and doing that synthesis manually by opening two UIs was explicit friction.
+
+v0.15.0 shipped the bridge: a `/prd <feature>` Telegram command and `POST /api/prd/generate` endpoint. On-demand, one LLM call, strict-shape Markdown artifact persisted to `KnowledgeArtifact(artifact_type='prd_doc')`. Plus UX-friction adds: `/prd` with no args shows a feature picker; every digest card got a `[📝 Deep-dive]` button.
+
+### Tradeoff register
+
+**Decision 11.1: PRD synthesis lives inside Prism, not a new central tool.**
+- **Gained:** Zero new deploy surface. Reuses Prism's existing research brief, query planner, Sonnet synthesizer, `KnowledgeArtifact` store, feedback-signal feedback loop, and Telegram digest. The PRD is just one more artifact type; the synthesis path is the same one that produces every trend. Total new code: ~450 lines across `loupe_client.py` + `prd_synthesizer.py` + the route + bot handler.
+- **Lost:** Prism's scope widens from "competitive intelligence" to "product-strategy synthesis." Future "what IS Prism?" positioning has to acknowledge that. Also: the API now depends on Loupe's reachability; when Loupe is down, PRD section 2 is blank. We handle this gracefully (the PRD says "Loupe unreachable") but the compound document is diminished.
+- **Net:** Right shape. The alternatives (Loupe hosts it — misaligned with Loupe's verification-only mandate; third repo — triples deploy surface for what's essentially one LLM call) both cost more and buy less. Asymmetric architecture (Prism = brain, Loupe = lens) is the correct shape for the product's current stage.
+
+**Decision 11.2: HTTP-only integration between Prism and Loupe. No shared DB, no cross-imports.**
+- **Gained:** Either repo can deploy/fail/iterate independently. The contract between them is a REST surface, not a schema — much smaller and more versionable. A future move to Postgres-per-service or separate cloud regions doesn't break anything.
+- **Lost:** Feature matching happens via free-text `ILIKE` (Loupe's `UatRun.feature_description` vs. the user's query) instead of structured joins. Recall is imperfect. A shared `feature_id` taxonomy would be stricter, but would also require the prism-core package carve.
+- **Net:** Right for v0.15. Free-text matching works well enough — the LLM synthesizes around recall gaps. Structured feature taxonomy deferred until it's demonstrably blocking quality.
+
+**Decision 11.3: On-demand trigger only; no scheduled weekly briefings.**
+- **Gained:** One flow to design, test, and explain. `/prd <feature>` in Telegram → 30-60s → Markdown. No cron, no "what counts as a weekly event?" decisions, no push-notification fatigue.
+- **Lost:** Strategic briefings (weekly cross-project roll-ups) are out of scope. If a PM wants a weekly digest, they have to trigger it manually.
+- **Net:** Correct for MVP. Scheduled briefings are a net-new product surface with unclear audience/format; shipping on-demand first lets real usage inform whether weekly is actually wanted.
+
+**Decision 11.4: Feature-picker (F1) and digest deep-dive (F2) in Phase 1, not Phase 2.**
+- **Gained:** Both shipped for ~4 hours of work total (two callback handlers + one endpoint + one keyboard-row addition). Turned `/prd` from a "remember the feature name" command into a "browse + tap" surface — matches how PMs actually work on a phone. F2 means digest cards become the entry point: system surfaces a trend → PM taps `[📝 Deep-dive]` → PRD generates scoped to that trend. Zero typing.
+- **Lost:** A bit of scope creep in Phase 1 (plan originally kept these as "Phase 1 enhancements"). But `/friction-finder` explicitly flagged them as shipping-blocking because on-demand flow without a picker makes usage sparse.
+- **Net:** Worth it. Friction-finder was right — typing a feature name from memory on mobile is a 40% friction overhead that kills actual use. The UX delta is the difference between "might ship" and "will ship."
+
+### Key lessons
+
+1. **Compounding wins when you refuse to duplicate.** Every concrete decision here reduces to "reuse Prism's existing spine." The cost-per-feature drops because each new feature is ~1 LLM call binding existing primitives.
+2. **Asymmetric architecture is a design choice, not a bug.** Prism-brain / Loupe-lens is simpler than any symmetric design. Embrace the asymmetry.
+3. **Friction-finder applied at the plan stage is worth more than polishing later.** F1 + F2 would have ended up as Phase 2 "nice to haves" that never shipped without the explicit friction check. The skill earned its slot.
+
+---
+
+## Chapter 12: The competitors-mismatch bug + the metric-consistency principle (April 21)
+
+### What happened
+
+User noticed that newly-created projects (Intuit, Sarvam.ai) showed "3 competitors" on their project card but the competitors tab was empty. Older projects (Swiggy, MakeMyTrip) worked fine. Diagnosed in ~2 minutes: the project-detail stats card counts `entity_type='company'` directly, while `GET /api/knowledge/competitors` required an additional `competes_with` relation. Some discovery paths write that relation; others don't. Fix: align the list endpoint with the counter (both use `entity_type='company'`). One source of truth.
+
+### Why it escaped every prior test
+
+I had validated Swiggy and MakeMyTrip extensively — both had the `competes_with` relation because older discovery runs from v0.9.x created it. The bug only manifested on projects created via the **post-carve** code path (new /new → competitive_intel discovery without the relation write). Intuit and Sarvam.ai were the first projects to exercise that path. My tests never exercised "freshly created resource, just-finished discovery" — they exercised "pre-populated resource, stable state."
+
+### Tradeoff register
+
+**Decision 12.1: Fix at the read layer (simplify `/competitors` query), not the write layer (make every agent path write the `competes_with` relation).**
+- **Gained:** One-line fix. Retroactively correct for all existing projects (no backfill needed). Single source of truth: `entity_type='company'` means "this is a competitor in Prism's model." No second index to keep in sync.
+- **Lost:** We lost the theoretical ability to have `company` entities that aren't competitors (e.g., "reference companies that aren't competing with us"). But Prism has never actually modeled that distinction — every `company` entity is de facto a competitor. So the capability we "lost" never existed.
+- **Net:** Correct. Write-layer fix (ensuring every agent path writes `competes_with`) is defensive theater — it adds a coupling between entity creation and relation creation that duplicates information already encoded in `entity_type`. Read-layer fix is the simpler invariant.
+
+**Decision 12.2: Add an invariant test instead of just fixing the bug.**
+- **Gained:** `tests/test_stats_consistency.py` asserts, for every project, that `stats.competitor_count == len(GET /competitors)`. Same for `entity_count` vs `GET /entities`, `observation_count` vs observations across all entities, `plan_count` vs `GET /plans`. Runs in CI and post-task-eval. This class of bug can't ship again without the test failing.
+- **Lost:** Another file to maintain. Tests drift if the underlying endpoints change shape.
+- **Net:** Worth it, and cheap. The invariants are the specification. The bug happened because no one had ever written down "these numbers must agree." Writing that down is how we make sure they continue to agree.
+
+### Key lessons
+
+1. **Tests against pre-existing data miss the fresh-resource class of bug.** Swiggy and MakeMyTrip were pre-migrated historical data, not outputs of the current code path. Adding a "canary new-project" smoke (create project → run discovery → assert all read surfaces populate) would have caught this instantly. Queued for Phase 2 of the invariants work.
+2. **When two code paths compute the same number by different rules, one of them is wrong.** It's not "they might diverge" — they will, eventually, on data you didn't test with. Converge on one canonical query per metric.
+3. **Stats cards and list endpoints must agree.** The invariant test now enforces this. In any system where a count is displayed on a card and its items are listed on a detail page, they must be computed from the same base query. If that's not true, fix it now — the drift will always eventually be visible to a user.
+4. **The honest answer to "why wasn't this caught earlier" is always about test surface, not about carefulness.** Adding invariants is the only sustainable fix.
+
+### Operational add-ons
+
+- `/post-task-eval` for API changes now includes the stats-consistency check.
+- New `tests/test_stats_consistency.py` runs via `pytest tests/` and hits live `BASE_URL` (defaults to `http://localhost:8100`; set env for Railway).
 
 ---
 

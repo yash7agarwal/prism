@@ -282,34 +282,27 @@ def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
 
 @router.get("/competitors", response_model=list[KnowledgeEntityOut])
 def list_competitors(project_id: int = Query(...), db: Session = Depends(get_db)):
-    competitor_ids = (
-        db.query(KnowledgeRelation.from_entity_id)
-        .join(KnowledgeEntity, KnowledgeRelation.from_entity_id == KnowledgeEntity.id)
+    """All `company`-typed entities for a project.
+
+    Historical note: earlier versions gated this on a `competes_with` relation
+    existing between the company and the project — but not all agent paths
+    create that relation when discovering competitors (e.g. Sarvam.ai and
+    Intuit had company entities without any relation), which produced a
+    mismatch where the project stats card said `competitor_count=3` but the
+    competitors page showed empty. The stats counter uses the same simpler
+    `entity_type='company'` filter, so aligning here brings them in sync.
+    """
+    entities = (
+        db.query(KnowledgeEntity)
         .filter(
-            KnowledgeRelation.relation_type == "competes_with",
             KnowledgeEntity.project_id == project_id,
             KnowledgeEntity.entity_type == "company",
         )
-        .union(
-            db.query(KnowledgeRelation.to_entity_id)
-            .join(KnowledgeEntity, KnowledgeRelation.to_entity_id == KnowledgeEntity.id)
-            .filter(
-                KnowledgeRelation.relation_type == "competes_with",
-                KnowledgeEntity.project_id == project_id,
-                KnowledgeEntity.entity_type == "company",
-            )
-        )
-        .all()
-    )
-    ids = [row[0] for row in competitor_ids]
-    if not ids:
-        return []
-    entities = (
-        db.query(KnowledgeEntity)
-        .filter(KnowledgeEntity.id.in_(ids))
         .order_by(KnowledgeEntity.name)
         .all()
     )
+    if not entities:
+        return []
 
     # Compute dynamic confidence from observation count
     entity_ids = [e.id for e in entities]

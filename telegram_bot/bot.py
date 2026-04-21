@@ -593,6 +593,230 @@ async def on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ---------------------------------------------------------------------------
+# /prd — combined PRD synthesis (Prism market lens + Loupe build lens)
+# ---------------------------------------------------------------------------
+#
+# Two flows:
+#   1. `/prd <feature>` — direct generation. Sends "generating…" then delivers.
+#   2. `/prd`            — inline keyboard of recent TestPlans ∪ starred trends
+#                          (F1 from the UX-friction plan). User taps → generate.
+# Plus one callback:
+#   3. `prd:dd:<entity_id>` — [Deep-dive] button attached to digest trend cards
+#                             (F2). Looks up the entity and generates a PRD for its name.
+
+
+def _md2_escape(s: str) -> str:
+    """Minimal MarkdownV2 escaper for the cover line we prepend."""
+    if not s:
+        return ""
+    for ch in r"_*[]()~`>#+-=|{}.!\\":
+        s = s.replace(ch, f"\\{ch}")
+    return s
+
+
+def _chunk_markdown(md: str, max_chars: int = 3800) -> list[str]:
+    """Split a long Markdown doc into Telegram-safe chunks.
+
+    Telegram caps single messages at ~4096 chars. We stay under with a
+    margin to leave room for the optional header. Breaks on paragraph
+    boundaries when possible so sections stay intact.
+    """
+    if len(md) <= max_chars:
+        return [md]
+    chunks: list[str] = []
+    remaining = md
+    while len(remaining) > max_chars:
+        # Prefer splitting at a paragraph boundary
+        split_at = remaining.rfind("\n\n", 0, max_chars)
+        if split_at < int(max_chars * 0.6):
+            # No good paragraph break — fall back to nearest newline
+            split_at = remaining.rfind("\n", 0, max_chars)
+        if split_at < int(max_chars * 0.3):
+            split_at = max_chars
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def _deliver_prd(message, api_base: str, project_id: int, feature: str) -> None:
+    """Call /api/prd/generate, edit status message, deliver Markdown chunks."""
+    import httpx
+    status = await message.reply_text(f"⏳ Generating PRD for *{_md2_escape(feature[:80])}*…",
+                                      parse_mode=ParseMode.MARKDOWN_V2)
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                f"{api_base}/api/prd/generate",
+                json={"project_id": project_id, "feature_description": feature},
+            )
+    except Exception as exc:
+        await status.edit_text(f"PRD request failed: {exc}")
+        return
+
+    if r.status_code != 200:
+        await status.edit_text(f"Server returned {r.status_code}: {r.text[:300]}")
+        return
+
+    out = r.json()
+    artifact_id = out.get("artifact_id")
+    # Fetch the saved Markdown
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            art = await client.get(f"{api_base}/api/knowledge/artifacts/{artifact_id}")
+        art.raise_for_status()
+        content = art.json().get("content_md", "")
+    except Exception as exc:
+        await status.edit_text(f"PRD generated (id={artifact_id}) but fetch failed: {exc}")
+        return
+
+    # Delete the status message, send the PRD in chunks. First chunk gets a
+    # short header so the user knows which feature this PRD is for.
+    try:
+        await status.delete()
+    except Exception:
+        pass
+    header = (
+        f"📝 PRD · {feature[:80]}\n"
+        f"   artifact #{artifact_id}  ·  Prism entities: {out.get('prism_evidence_count')}  ·  "
+        f"Loupe runs: {out.get('loupe_runs_matched') if out.get('loupe_evidence_available') else 'n/a'}\n"
+        f"{'─' * 40}\n\n"
+    )
+    chunks = _chunk_markdown(header + content)
+    for ch in chunks:
+        try:
+            await message.reply_text(ch)
+        except Exception as exc:
+            logger.warning("[bot] PRD chunk send failed: %s", exc)
+
+
+async def cmd_prd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/prd [<feature description>]` — generate a combined PRD doc.
+
+    With a feature arg → call the synthesizer directly.
+    Without → show an inline keyboard of recent plans/starred trends (F1).
+    """
+    import httpx
+    chat_id = update.effective_chat.id
+    project_id = _get_intel_project(chat_id)
+    if project_id is None:
+        await update.message.reply_text(
+            "Set an active project first. Use `/new <name>` or pick one via `/intel use <id>`.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    args = context.args or []
+    if args:
+        feature = " ".join(args).strip()
+        await _deliver_prd(update.message, _api_base(), project_id, feature)
+        return
+
+    # No arg → show picker (F1). Query candidates from the API.
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_api_base()}/api/prd/feature-candidates",
+                                 params={"project_id": project_id})
+        r.raise_for_status()
+        candidates = r.json().get("candidates", [])
+    except Exception as exc:
+        await update.message.reply_text(
+            f"Couldn't fetch recent features ({exc}).\n"
+            "Try `/prd <feature description>` directly, e.g.\n"
+            "`/prd hotel rebooking flow`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    if not candidates:
+        await update.message.reply_text(
+            "No recent features yet — type a feature description:\n"
+            "`/prd hotel rebooking flow`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    # Stash candidates in chat_data so callback data stays short (Telegram
+    # callback_data is 64-byte capped; feature names would overflow).
+    context.chat_data["prd_candidates"] = candidates
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    for i, c in enumerate(candidates):
+        src_tag = "📋" if c["source"] == "plan" else "⭐"
+        rows.append([InlineKeyboardButton(
+            f"{src_tag} {c['label'][:60]}",
+            callback_data=f"prd:gen:{i}",
+        )])
+    await update.message.reply_text(
+        "Which feature should the PRD cover?",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def cb_prd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle both F1 picker taps (`prd:gen:<idx>`) and F2 digest deep-dive
+    taps (`prd:dd:<entity_id>`)."""
+    import httpx
+    query = update.callback_query
+    if query is None or not query.data:
+        return
+    await query.answer()
+    chat_id = update.effective_chat.id
+    project_id = _get_intel_project(chat_id)
+    if project_id is None:
+        try:
+            await query.message.reply_text("No active project — run /new or /intel use <id> first.")
+        except Exception:
+            pass
+        return
+
+    parts = query.data.split(":", 2)
+    if len(parts) < 3:
+        return
+    _, kind, token = parts
+
+    feature: str | None = None
+    if kind == "gen":
+        # F1: index into stashed candidates
+        try:
+            idx = int(token)
+        except ValueError:
+            return
+        candidates = context.chat_data.get("prd_candidates") or []
+        if 0 <= idx < len(candidates):
+            feature = candidates[idx]["label"]
+    elif kind == "dd":
+        # F2: look up entity by id and use its name
+        try:
+            entity_id = int(token)
+        except ValueError:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{_api_base()}/api/knowledge/entities/{entity_id}")
+            if r.status_code == 200:
+                feature = (r.json() or {}).get("name")
+        except Exception:
+            pass
+
+    if not feature:
+        try:
+            await query.message.reply_text("Couldn't resolve the feature — try `/prd <feature>`.")
+        except Exception:
+            pass
+        return
+
+    # Hide the picker keyboard so the user sees progress inline
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    await _deliver_prd(query.message, _api_base(), project_id, feature)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -615,8 +839,10 @@ def main() -> None:
     app.add_handler(CommandHandler("new", cmd_new))
     app.add_handler(CommandHandler("intel", cmd_intel))
     app.add_handler(CommandHandler("purge", cmd_purge))
+    app.add_handler(CommandHandler("prd", cmd_prd))
     # Research-digest buttons + optional reason replies
     app.add_handler(CallbackQueryHandler(cb_signal, pattern=r"^sig:"))
+    app.add_handler(CallbackQueryHandler(cb_prd, pattern=r"^prd:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_reply))
 
     logger.info("[bot] Starting polling...")

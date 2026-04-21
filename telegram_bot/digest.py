@@ -127,14 +127,22 @@ def _md_escape(text: str) -> str:
 
 
 def _keyboard(entity_id: int) -> dict[str, Any]:
-    """Inline keyboard — keep/dismiss/star. Callback data encodes entity_id."""
+    """Inline keyboard — keep/dismiss/star (row 1) + deep-dive (row 2).
+
+    `sig:*` callbacks are handled by bot.cb_signal (F1 from plan).
+    `prd:dd:*` is handled by bot.cb_prd → generates a combined PRD scoped
+    to this trend's entity (F2 from UX-friction plan).
+    """
     return {
         "inline_keyboard": [
             [
                 {"text": "👍 Keep", "callback_data": f"sig:kept:{entity_id}"},
                 {"text": "✖ Dismiss", "callback_data": f"sig:dismissed:{entity_id}"},
                 {"text": "⭐ Star", "callback_data": f"sig:starred:{entity_id}"},
-            ]
+            ],
+            [
+                {"text": "📝 Deep-dive (PRD)", "callback_data": f"prd:dd:{entity_id}"},
+            ],
         ]
     }
 
