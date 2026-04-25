@@ -256,8 +256,9 @@ def research_industry_trends(
 
     synthesis_prompt = f"""You are a consumer insights researcher for {brief.project_name}.
 
-SUBJECT DESCRIPTION:
-{brief.project_description or '(no description)'}
+SUBJECT (this is the company you are researching FOR — do NOT extract it as a competitor or trend):
+  Name: {brief.project_name}
+  Description: {brief.project_description or '(no description)'}
 
 INFERRED INDUSTRY: {plan.inferred_industry or 'unknown'}
 {known_block}
@@ -270,11 +271,12 @@ Your job: identify NICHE CONSUMER TRENDS **specific to {brief.project_name}'s do
 ({plan.inferred_industry}) that reveal new product opportunities.
 
 DO NOT extract:
+- {brief.project_name} itself (in any phrasing — descriptions OF {brief.project_name} are NOT trends)
+- Specific people / executives / scientists by name (those are not trends)
+- Specific organizations / regulators / agencies by name (e.g. "European Chemicals Agency") — those are entities, not trends. If you must mention them, do so inside the description of an actual trend, not as the trend's name.
+- Commodity-market / metals-market / financial-instrument commentary that happens to share a keyword with the subject's name (e.g. if the subject is "Platinum Industries" the company, do not extract "platinum metal market deficit" — that's a different domain).
 - Generic "market is growing" / size / growth claims
-- Obvious moves everyone knows
-- Trends that belong to OTHER industries (if the subject is a food-delivery
-  app, do not emit travel trends; if the subject is fintech, do not emit
-  hospitality trends, etc.) — cross-industry leakage is a bug.
+- Trends that belong to OTHER industries — cross-industry leakage is a bug.
 
 DO extract:
 - Specific underserved segments with unmet needs
@@ -284,7 +286,7 @@ DO extract:
 - Named product-strategy moves by competitors that reveal a gap
 
 For each trend, provide:
-- "name": specific, named pattern (not a vague phrase)
+- "name": specific, named pattern (not a vague phrase, NOT {brief.project_name}, NOT a person, NOT an organization)
 - "description": 3-4 sentences — the consumer need, why it's underserved, what a product could do
 - "timeline": "past" | "present" | "emerging" | "future"
 - "category": "consumer_behavior" | "technology" | "regulation" | "demographics" | "market_structure"
@@ -295,7 +297,7 @@ For each trend, provide:
 
 Return JSON: {{"trends": [...]}}
 
-Extract 5-10 trends. Every trend must be SPECIFIC, domain-relevant, and ACTIONABLE."""
+Extract 5-10 trends. Every trend must be SPECIFIC, domain-relevant, ACTIONABLE, and **about a pattern in the market — not about a single named entity or person**."""
 
     try:
         response = synthesize(

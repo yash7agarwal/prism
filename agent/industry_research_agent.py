@@ -495,14 +495,24 @@ Return ONLY the JSON array, no other text."""
                 if e.get("canonical_name")
             }
             novel_count = 0
+            from agent.extraction_guard import coerce_entity_type, validate_extraction
+            rejected = 0
             for trend in kept:
                 meta = {"timeline": trend.get("timeline", "present"), "category": trend.get("category", "general")}
                 meta.update(trend.get("quantification") or {})
                 canonical = trend.get("canonical_name") or (trend.get("name") or "").lower().strip()
+                # Respect synthesizer's category — used to be hardcoded to
+                # "trend" which collapsed companies/regulations/people/etc.
+                inferred_type = coerce_entity_type(trend.get("category"))
+                guard = validate_extraction(trend["name"], inferred_type, self.project_name)
+                if not guard.ok:
+                    logger.info(f"[industry_research] dropped extraction: {guard.reason}")
+                    rejected += 1
+                    continue
                 if canonical and canonical not in pre_existing_trends:
                     novel_count += 1
                 eid = self.knowledge.upsert_entity(
-                    "trend", trend["name"], trend.get("description", ""), metadata=meta,
+                    inferred_type, trend["name"], trend.get("description", ""), metadata=meta,
                 )
                 self.knowledge.add_observation(
                     eid, "general", trend.get("description", ""),
@@ -510,6 +520,8 @@ Return ONLY the JSON array, no other text."""
                     lens_tags=["growth"],
                 )
                 self._current_result["entities_created"] = self._current_result.get("entities_created", 0) + 1
+            if rejected:
+                logger.warning(f"[industry_research] {rejected} extractions rejected by guard")
 
             quality["retrieval_yield"] = (
                 sum(1 for _ in result.get("retrieval_bundle", [])) / max(len(plan.queries), 1)
@@ -556,8 +568,15 @@ Return ONLY the JSON array, no other text."""
                     text = text.split("```")[1]
                     if text.startswith("json"): text = text[4:]
                     text = text.strip()
+                from agent.extraction_guard import coerce_entity_type, validate_extraction
                 for f in json.loads(text).get("findings", []):
-                    eid = self.knowledge.upsert_entity("trend", f.get("content", "")[:60], f.get("content", ""))
+                    name = (f.get("name") or f.get("content", "")[:60] or "").strip()
+                    inferred_type = coerce_entity_type(f.get("type"))
+                    guard = validate_extraction(name, inferred_type, self.project_name)
+                    if not guard.ok:
+                        logger.info(f"[industry_research:fallback] dropped: {guard.reason}")
+                        continue
+                    eid = self.knowledge.upsert_entity(inferred_type, name, f.get("content", ""))
                     self.knowledge.add_observation(eid, f.get("type", "general"), f.get("content", ""), source_url=f.get("source_url"), lens_tags=f.get("lenses"))
                     self._current_result["observations_added"] = self._current_result.get("observations_added", 0) + 1
             except Exception as e:
@@ -606,6 +625,14 @@ Return ONLY the JSON array, no other text."""
         }
         obs_type = inp["observation_type"]
         target_entity_type = entity_type_map.get(obs_type, "trend")
+
+        # Self-extraction guard — don't let the agent record findings
+        # ABOUT the user's project as if it's a competitor/topic.
+        from agent.extraction_guard import validate_extraction
+        guard = validate_extraction(inp["topic"], target_entity_type, self.project_name)
+        if not guard.ok:
+            logger.info(f"[industry_research:save_finding] dropped: {guard.reason}")
+            return json.dumps({"status": "rejected", "reason": guard.reason})
 
         # Find or create the topic entity
         entities = self.knowledge.find_entities(name_like=inp["topic"])

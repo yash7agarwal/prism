@@ -483,6 +483,21 @@ Return ONLY a JSON array. Each item:
             competitor_name = context.get("competitor_name") or item.description.split("for ")[-1].split(",")[0].strip()
             logger.info(f"[{self.agent_type}] Efficient research for: {competitor_name}")
 
+            # Self-extraction guard — refuse to "research a competitor"
+            # whose name is the project itself. Caught early so we don't
+            # spin up an LLM call + DB write for a guaranteed-bad result.
+            from agent.extraction_guard import validate_extraction
+            guard = validate_extraction(competitor_name, "company", self.project_name)
+            if not guard.ok:
+                logger.warning(f"[competitive_intel] dropped competitor work item: {guard.reason}")
+                self._current_result = {
+                    "status": "completed",
+                    "summary": f"Rejected: {guard.reason}",
+                    "entities_created": 0,
+                    "observations_added": 0,
+                }
+                return self._current_result
+
             from agent.efficient_researcher import research_competitor
             result = research_competitor(competitor_name, self.project_name, self.project_description)
 

@@ -2,6 +2,27 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — 2026-04-26 — Extraction guard: end-to-end fix for the "every new project surfaces these bugs" class
+
+After v0.15.5 fixed rate-limiting and produced the first successful extraction on project 6 ("Platinum industries limited"), the OUTPUT itself was wrong: 10 entities created, all `entity_type='trend'`, including the project itself ("Platinum Industries is a leading PVC stabilizer manufacturer"), random named people ("Dr. Michael Schiller"), regulators ("European Chemicals Agency"), and platinum-the-metal commentary that polluted the search results. Same class of bug as the v0.11.0 Swiggy/MakeMyTrip travel-trend contamination — a fresh symptom every time a new project is created.
+
+This release closes the class. New `agent/extraction_guard.py` is a single chokepoint with three layers (type whitelist, self-extraction guard, trivial-name reject) plus a `coerce_entity_type` mapper that respects the synthesizer's category instead of force-coercing everything to `trend`. Wired into every persistence site so future synthesis drift gets caught at write-time, not after a user files a bug report.
+
+### Added
+- `agent/extraction_guard.py` — `validate_extraction(name, entity_type, project_name) -> ValidationResult`. Rejects: too-short names, trivial generics ("Industry", "Market", "Trends"), unknown `entity_type`, and self-references. Self-reference uses normalized substring containment so "Platinum Industries is a leading PVC stabilizer manufacturer" matches "Platinum Industries Ltd." after stripping common corporate suffixes.
+- `agent/extraction_guard::coerce_entity_type` — maps synthesizer category strings (`"market_structure"`, `"regulatory"`, `"company"`, etc.) to the canonical entity_type whitelist. Replaces the silent `entity_type="trend"` force-coercion that was collapsing companies/regulations/people into the wrong bucket.
+- `tests/test_extraction_guard.py` — 32 tests covering self-reference parameterized by phrasing, type-whitelist parameterized by valid type, trivial-name rejection, and the full category coercion table including the 4 Platinum UAT categories that were broken.
+
+### Changed
+- `agent/industry_research_agent.py:504` — extracted entities now use `coerce_entity_type(trend["category"])` instead of hardcoded `"trend"`. Validates through the guard before upsert; rejected items are logged with reason and counted, not silently created.
+- `agent/industry_research_agent.py:560` (fallback path for non-industry-research categories) — same guard wiring.
+- `agent/industry_research_agent.py::_tool_save_finding` — guard runs before upsert so the autonomous tool-use path can't end-run the validator.
+- `agent/competitive_intel_agent.py:482` — refuses to spin up a competitor profile when the requested competitor name is a self-reference, before any LLM call. Saves the cost of a guaranteed-bad work item.
+- `agent/efficient_researcher.py::research_industry_trends` synthesis prompt — explicit "DO NOT extract" list now names the project as the first item, names "specific people / executives", names "specific organizations / regulators / agencies", and adds a commodity-market-vs-company-with-shared-keyword example tied to the Platinum UAT failure. Forbids using a person or organization NAME as the trend NAME.
+
+### Why this isn't just a "tighten the prompt" fix
+Prompts drift; LLMs hallucinate; the same prompt change that fixes the Platinum case can regress on the next industry. The guard runs AFTER synthesis so even a misbehaving prompt can't write garbage to the KG — it logs `[industry_research] dropped extraction: self-reference: 'X' matches project 'Y'` and skips the upsert. Belt and suspenders.
+
 ## [0.15.5] — 2026-04-26 — Per-provider rate limiter (no more burst-429s)
 
 After v0.15.4 the Claude → Gemini → Groq cascade was complete, but live UAT revealed a deeper problem: the agent fires bursts of LLM calls (parallel work items + multiple sessions running concurrently), and combined free-tier RPM caps (Gemini 15 + Groq 30 = 45/min nominal) couldn't absorb the bursts. Result: only 26% of Groq calls succeeded (5 OK / 19 total) — even with the cascade, every LLM was throttled simultaneously.
