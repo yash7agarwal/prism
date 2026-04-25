@@ -2,6 +2,17 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.15.2] — 2026-04-25 — Exa.ai search fallback
+
+Patch cut after a fresh project ("Platinum industries limited") returned 0 competitors despite agents reporting "completed". Root cause was the search cascade collapsing: Tavily's dev-tier key (`tvly-dev-`) hit its monthly quota → 432, Brave key wasn't set, and DuckDuckGo lite times out under load. Result: every research query returned zero sources, agents finished with "No relevant data found in search", competitors stayed empty.
+
+### Added
+- `tools/web_research.py` — Exa.ai as a 2nd-tier provider in the cascade. Order is now Tavily → Exa → Brave → DuckDuckGo. Exa uses neural / semantic search, which is genuinely better than keyword-matching for "find companies similar to X" research-intent queries — so even when Tavily quota is fine, Exa pulls more relevant results for tail-niche industries that keyword search struggles on (plastic additives manufacturers, specialty chemicals, etc).
+- `EXA_API_KEY` env var on Railway prism-api.
+
+### Changed
+- Search cascade docstring updated to reflect the new four-provider order.
+
 ## [0.15.1] — 2026-04-20 — Lens-detail PG fix + visible error surfaces
 
 Patch cut after the MakeMyTrip "Lenses → 0 found" report. Root cause was the third occurrence of the same bug class: a number displayed somewhere diverged from the list endpoint behind it, and the frontend swallowed the resulting error with `.catch(() => {})`. This release fixes the specific query, replaces silent catches with visible error banners across five tabs, and expands the invariant suite to 32 tests so the class can't recur unnoticed.

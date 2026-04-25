@@ -93,6 +93,7 @@ class WebResearcher:
 
     def __init__(self) -> None:
         self._tavily_key: str | None = os.getenv("TAVILY_API_KEY")
+        self._exa_key: str | None = os.getenv("EXA_API_KEY")
         self._brave_key: str | None = os.getenv("BRAVE_API_KEY")
         self._client = httpx.Client(
             timeout=15,
@@ -105,13 +106,19 @@ class WebResearcher:
     # ------------------------------------------------------------------
 
     def search(self, query: str, max_results: int = 10) -> list[dict]:
-        """Run a web search. Tries Tavily → Brave → DuckDuckGo lite.
+        """Run a web search. Tries Tavily → Exa → Brave → DuckDuckGo lite.
 
         Post-processes every provider's results with the shared source-authority
         config: blocklisted hosts are dropped, each result gets a `tier` field
         (1 = most authoritative), and results are sorted tier-ascending so
         downstream consumers that slice [:N] get the strongest sources first.
         Over-fetches slightly (+5) so the blocklist doesn't starve max_results.
+
+        Cascade rationale: Tavily first (cheapest at small scale, well-shaped
+        snippets); Exa second (semantic neural search, far better than keyword
+        for "find companies similar to X" research queries — used as primary
+        when Tavily quota is exhausted); Brave third (paid, highest authority);
+        DDG last (best-effort fallback).
         """
         fetch_n = max_results + 5
         raw: list[dict] = []
@@ -121,6 +128,12 @@ class WebResearcher:
                 raw = self._search_tavily(query, fetch_n)
             except Exception as exc:
                 logger.warning("Tavily search failed: %s", exc)
+
+        if not raw and self._exa_key:
+            try:
+                raw = self._search_exa(query, fetch_n)
+            except Exception as exc:
+                logger.warning("Exa search failed: %s", exc)
 
         if not raw and self._brave_key:
             try:
@@ -179,6 +192,48 @@ class WebResearcher:
             }
             for r in data.get("results", [])
         ]
+
+    # -- Exa (neural / semantic search) --
+
+    def _search_exa(self, query: str, max_results: int) -> list[dict]:
+        """Exa's /search endpoint with autoprompt + content snippets.
+
+        Exa uses neural search by default which is excellent for research-
+        intent queries ("find companies similar to ..."). We pin numResults
+        to max_results and request a short text snippet per result so the
+        downstream synthesizer has something to read without a follow-up
+        contents() call.
+        """
+        resp = self._client.post(
+            "https://api.exa.ai/search",
+            headers={
+                "x-api-key": self._exa_key or "",
+                "Content-Type": "application/json",
+            },
+            json={
+                "query": query,
+                "numResults": max_results,
+                "useAutoprompt": True,
+                "type": "auto",
+                "contents": {"text": {"maxCharacters": 600}},
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        try:
+            from utils import cost_tracker
+            cost_tracker.record("exa", search_count=1, call_type="search")
+        except Exception:
+            pass
+        out: list[dict] = []
+        for r in data.get("results", []):
+            text = r.get("text") or ""
+            out.append({
+                "title": r.get("title") or "",
+                "url": r.get("url") or "",
+                "snippet": text[:500],
+            })
+        return out
 
     # -- Brave --
 
