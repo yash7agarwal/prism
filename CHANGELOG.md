@@ -2,6 +2,13 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.15.4] — 2026-04-26 — Groq fallback for text-only synthesis path
+
+v0.15.3 wired Groq as 3rd-tier fallback in the **tool-use** path (`gemini_client.ask_with_tools`) but left the **text-only** path (`gemini_client.ask` → `_post`) unpatched. Live UAT on project 6 surfaced this immediately: tracebacks ended with `RuntimeError: Gemini call failed after 3 retries: None` raised from `_post()` — competitive_intel sessions failed within minutes despite the new Groq wiring.
+
+### Fixed
+- `utils/gemini_client::ask` — wraps `_post()` and falls back to `groq_client.synthesize()` when Gemini exhausts retries. Closes the gap so both LLM call patterns (text-only and tool-use) have the full Claude → Gemini → Groq cascade.
+
 ## [0.15.3] — 2026-04-26 — Groq tool-use fallback + AgentSession status
 
 After v0.15.2 fixed search rate-limiting via Exa, the next bottleneck surfaced: Gemini's free tier (`gemini-flash-latest`, 15 RPM) was 429-ing on every synthesis call, leaving the agent stuck on `Gemini call failed after 3 retries`. v0.15.3 wires Groq Llama 3.3 70B (free, 30 RPM, 14,400 RPD — fresher quota bucket) as a 3rd-tier LLM fallback after Claude → Gemini, and fixes the always-null `AgentSession.status` field that was making the UI's "agent done?" indicator unreadable.

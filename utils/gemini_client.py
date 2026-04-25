@@ -44,7 +44,12 @@ def ask(
     system: str = "",
     retries: int = 3,
 ) -> str:
-    """Call Gemini text generation. Returns the response text."""
+    """Call Gemini text generation. Returns the response text.
+
+    Falls back to Groq Llama 3.3 70B synthesis when Gemini's free-tier
+    retries exhaust — same 3rd-tier fallback as ask_with_tools, but for
+    the text-only path used by claude_client.ask() callers.
+    """
     # Translate Claude model names to Gemini equivalents
     if model.startswith("claude"):
         model = DEFAULT_MODEL
@@ -55,7 +60,20 @@ def ask(
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    return _post(model, payload, retries)
+    try:
+        return _post(model, payload, retries)
+    except Exception as exc:
+        try:
+            from utils import groq_client
+            if groq_client.is_available():
+                logger.warning(f"[gemini] ask() exhausted ({exc}) — falling back to Groq")
+                return groq_client.synthesize(
+                    prompt=prompt, max_tokens=max_tokens,
+                    system=system, retries=retries,
+                )
+        except Exception as groq_err:
+            logger.error(f"[gemini] Groq text-fallback also failed: {groq_err}")
+        raise
 
 
 def ask_fast(prompt: str, max_tokens: int = 512) -> str:
