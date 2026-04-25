@@ -2,6 +2,21 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.15.5] — 2026-04-26 — Per-provider rate limiter (no more burst-429s)
+
+After v0.15.4 the Claude → Gemini → Groq cascade was complete, but live UAT revealed a deeper problem: the agent fires bursts of LLM calls (parallel work items + multiple sessions running concurrently), and combined free-tier RPM caps (Gemini 15 + Groq 30 = 45/min nominal) couldn't absorb the bursts. Result: only 26% of Groq calls succeeded (5 OK / 19 total) — even with the cascade, every LLM was throttled simultaneously.
+
+### Added
+- `utils/rate_limiter.py` — module-level `throttle(provider)` context manager that combines (a) a `Semaphore` capping concurrent in-flight calls per provider with (b) a min-interval gate that spaces calls just under the documented free-tier RPM. Gemini gets 4.5s spacing (under 60s/15 RPM = 4s); Groq gets 2.5s spacing (under 60s/30 RPM = 2s). Smoke-tested locally — three sequential `with throttle("gemini")` calls land at t+0, t+4.5, t+9.0s as expected.
+
+### Changed
+- `utils/gemini_client::_post` and `ask_with_tools` HTTP call sites are wrapped in `throttle("gemini")`.
+- `utils/groq_client::synthesize` and `ask_with_tools` HTTP call sites are wrapped in `throttle("groq")`.
+
+### Tradeoff
+- **Gained:** 0% expected 429 rate from rate-limit triggers under expected agent load. Free tiers stay free; no card needed.
+- **Lost:** session latency — each LLM call now waits up to 4.5s before firing. Worst case, a single session that makes 10 LLM calls now takes ~45s longer. Acceptable for autonomous background research; would not be acceptable for an interactive UI flow.
+
 ## [0.15.4] — 2026-04-26 — Groq fallback for text-only synthesis path
 
 v0.15.3 wired Groq as 3rd-tier fallback in the **tool-use** path (`gemini_client.ask_with_tools`) but left the **text-only** path (`gemini_client.ask` → `_post`) unpatched. Live UAT on project 6 surfaced this immediately: tracebacks ended with `RuntimeError: Gemini call failed after 3 retries: None` raised from `_post()` — competitive_intel sessions failed within minutes despite the new Groq wiring.

@@ -220,13 +220,15 @@ def ask_with_tools(
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
+    from utils.rate_limiter import throttle
     url = f"{_API_BASE}/{model}:generateContent?key={_api_key()}"
     backoff_seconds = [30, 60, 120]
     last_err = None
 
     for attempt in range(retries):
         try:
-            r = httpx.post(url, json=payload, timeout=120)
+            with throttle("gemini"):
+                r = httpx.post(url, json=payload, timeout=120)
             if r.status_code in (429, 503):
                 wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
                 logger.warning(f"[gemini] {r.status_code} — retrying in {wait}s")
@@ -341,12 +343,14 @@ def _post(model: str, payload: dict, retries: int) -> str:
     Backoff schedule: 30s, 60s, 120s — Gemini free tier is 15 RPM and the cool-down
     needs to be substantial enough to actually clear the bucket.
     """
+    from utils.rate_limiter import throttle
     url = f"{_API_BASE}/{model}:generateContent?key={_api_key()}"
     backoff_seconds = [30, 60, 120, 240]
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
-            r = httpx.post(url, json=payload, timeout=120)
+            with throttle("gemini"):
+                r = httpx.post(url, json=payload, timeout=120)
             if r.status_code in (429, 503):
                 wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
                 logger.warning(f"[gemini] {r.status_code} — retrying in {wait}s (attempt {attempt + 1}/{retries})")

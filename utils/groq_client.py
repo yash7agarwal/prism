@@ -78,10 +78,12 @@ def synthesize(
         "Content-Type": "application/json",
     }
 
+    from utils.rate_limiter import throttle
     backoff = [5, 15, 30]
     for attempt in range(retries):
         try:
-            r = httpx.post(_API_BASE, json=payload, headers=headers, timeout=60)
+            with throttle("groq"):
+                r = httpx.post(_API_BASE, json=payload, headers=headers, timeout=60)
             if r.status_code == 429:
                 wait = backoff[min(attempt, len(backoff) - 1)]
                 logger.warning(f"[groq] 429 rate limit — retrying in {wait}s")
@@ -250,11 +252,13 @@ def ask_with_tools(
         "Content-Type": "application/json",
     }
 
+    from utils.rate_limiter import throttle
     backoff = [5, 15, 30]
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
-            r = httpx.post(_API_BASE, json=payload, headers=headers, timeout=60)
+            with throttle("groq"):
+                r = httpx.post(_API_BASE, json=payload, headers=headers, timeout=60)
             if r.status_code == 429:
                 wait = backoff[min(attempt, len(backoff) - 1)]
                 logger.warning(f"[groq] 429 — retrying in {wait}s (attempt {attempt+1}/{retries})")
