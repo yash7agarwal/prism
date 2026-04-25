@@ -44,10 +44,25 @@ def get_status(project_id: int, db: Session = Depends(get_db)):
 
 @router.post("/run/{agent_type}")
 def run_agent(agent_type: str, project_id: int, db: Session = Depends(get_db)):
-    """Trigger a single agent session in a background thread."""
+    """Trigger a single agent session in a background thread.
+
+    Returns 404 immediately if agent_type isn't configured for this
+    project's orchestrator. Without this check the endpoint silently
+    returned 200 for *any* string (e.g. "competitive_intel" — which
+    is a leg of the "intel" agent, not a top-level agent_type), and
+    the run_agent_session() inside the thread would no-op with
+    {"status": "unknown_agent"}, but the caller would never see it.
+    Cost was multi-hour debugging across two sessions.
+    """
     from agent.product_os_orchestrator import get_orchestrator
 
     orch = get_orchestrator(project_id)
+    if agent_type not in orch.config:
+        valid = sorted(orch.config.keys())
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown agent_type {agent_type!r}. Valid: {valid}",
+        )
 
     def _run():
         try:

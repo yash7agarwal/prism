@@ -2,6 +2,16 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] — 2026-04-26 — `/run/{agent_type}` returns 404 on unknown agent_type
+
+While verifying v0.16.0 end-to-end on a fresh project, every `POST /api/product-os/run/competitive_intel?project_id=X` returned `200 OK` and reported `"status": "started"` — but no session was ever created and no work occurred. The orchestrator's `run_agent_session("competitive_intel")` returned `{"status": "unknown_agent"}` because `competitive_intel` is a *leg* of the top-level `intel` agent, not a configured top-level agent_type itself. The route's background thread had a blanket `except Exception: pass` that swallowed this, leaving the caller with a fake-success response. Hours of debugging traced symptoms ("project 6 has 0 new entities!") that were really "the trigger was a no-op."
+
+### Fixed
+- `webapp/api/routes/product_os::run_agent` — checks `agent_type in orch.config` BEFORE spawning the thread; returns `404` with the list of valid agent_types when unknown. Future invalid triggers fail loudly. The blanket `except` inside the thread is preserved (it still has work to do — catching genuine runtime errors after a valid agent_type has been confirmed).
+
+### Why a v0.16.1 patch and not folded into v0.16.0
+v0.16.0 is the architectural fix (extraction guard). This is the silent-no-op symptom that hid v0.16.0's effects from us. They are independently shippable; the changelog separates them so future readers can pattern-match each from its bug report.
+
 ## [0.16.0] — 2026-04-26 — Extraction guard: end-to-end fix for the "every new project surfaces these bugs" class
 
 After v0.15.5 fixed rate-limiting and produced the first successful extraction on project 6 ("Platinum industries limited"), the OUTPUT itself was wrong: 10 entities created, all `entity_type='trend'`, including the project itself ("Platinum Industries is a leading PVC stabilizer manufacturer"), random named people ("Dr. Michael Schiller"), regulators ("European Chemicals Agency"), and platinum-the-metal commentary that polluted the search results. Same class of bug as the v0.11.0 Swiggy/MakeMyTrip travel-trend contamination — a fresh symptom every time a new project is created.
