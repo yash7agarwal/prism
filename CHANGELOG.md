@@ -2,6 +2,13 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.17.2] — 2026-04-27 — Single canonical URL: `prism-ros.vercel.app`
+
+The Vercel project had accumulated three half-working aliases (`prism.is-a.dev` 302'd to a splash page; `prism-intel.vercel.app` was squatted by another Vercel team after our project was deleted in an earlier reorg; `prism-three-alpha` was an auto-generated string nobody wanted). Consolidated to one clean canonical: `prism-ros.vercel.app`. The CORS allowlist is updated to match.
+
+### Changed
+- `webapp/api/main.py` — CORS `_default_origins` now lists only `prism-ros.vercel.app` for production. Removed `prism.is-a.dev` (DNS broken), `prism-intel.vercel.app` (owned by another team), `prism-three-alpha.vercel.app` (auto-generated, replaced).
+
 ## [0.17.1] — 2026-04-27 — Vercel auto-deploy wired
 
 After v0.17.0 shipped to GitHub, the Vercel-hosted frontend (`prism-three-alpha.vercel.app`) was 6 days stale because the project had no git connection — pushes to `main` weren't triggering builds. Same root cause as the Railway auto-deploy gap surfaced earlier this session.
