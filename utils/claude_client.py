@@ -66,6 +66,8 @@ def ask(
     if system:
         kwargs["system"] = system
 
+    import logging
+    _logger = logging.getLogger(__name__)
     for attempt in range(retries):
         try:
             resp = _get_client().messages.create(**kwargs)
@@ -74,17 +76,49 @@ def ask(
         except anthropic.RateLimitError:
             time.sleep(2 ** attempt * 5)
         except (anthropic.BadRequestError, anthropic.APIStatusError) as e:
+            # v0.17.3: log the actual error body so non-credit 400s surface
+            # loudly. Previously every 400 fell to Gemini → 5-min Gemini-retry
+            # waste because synthesis prompts triggering "prompt too long" or
+            # "model not allowed on tier" got misclassified as billing.
             err_str = str(e).lower()
-            if "credit balance" in err_str or "usage limits" in err_str or "billing" in err_str:
-                import logging
-                logging.getLogger(__name__).warning("[claude] Credit limit — falling back to Gemini")
+            _logger.warning(
+                f"[claude] {type(e).__name__} (model={model}): {str(e)[:400]}"
+            )
+            if _is_credit_or_billing(err_str):
+                _logger.warning("[claude] credit/billing limit — falling back to Gemini")
                 from utils import gemini_client
                 return gemini_client.ask(prompt=prompt, max_tokens=max_tokens, model=model, system=system, retries=retries)
             if hasattr(e, 'status_code') and e.status_code >= 500 and attempt < retries - 1:
                 time.sleep(2 ** attempt * 2)
             else:
+                # Non-credit 400 (bad model name, prompt too long, invalid
+                # params): re-raise loudly. The Gemini cascade can't fix any
+                # of these — falling through wastes minutes for nothing.
                 raise
     raise RuntimeError(f"Claude call failed after {retries} retries")
+
+
+# v0.17.3: pulled out so both ask() and ask_with_tools() agree on the
+# definition. Strings checked are the canonical Anthropic API error
+# fragments — anything else is NOT a credit problem.
+_CREDIT_BILLING_FRAGMENTS: tuple[str, ...] = (
+    "credit balance",
+    "credit balance is too low",
+    "usage limits",
+    "monthly usage limit",
+    "billing",
+    "payment required",
+)
+
+
+def _is_credit_or_billing(err_str_lower: str) -> bool:
+    """True iff the error message literally signals credit/billing exhaustion.
+
+    Wider matches than this caused v0.17.0–.2 reports to mis-cascade to
+    Gemini on every malformed-prompt 400, burning ~5 min per call before
+    final failure. Keep this tight.
+    """
+    return any(frag in err_str_lower for frag in _CREDIT_BILLING_FRAGMENTS)
 
 
 def ask_fast(prompt: str, max_tokens: int = 512) -> str:
@@ -185,14 +219,19 @@ def ask_with_tools(
     if system:
         kwargs["system"] = system
 
+    import logging
+    _logger = logging.getLogger(__name__)
     try:
         return _get_client().messages.create(**kwargs)
     except (anthropic.BadRequestError, anthropic.AuthenticationError) as e:
+        # v0.17.3: same tightening as ask() — only fall to Gemini on real
+        # credit/billing exhaustion, log all other 400s loudly.
         err_str = str(e).lower()
-        if "credit balance" in err_str or "usage limits" in err_str or "billing" in err_str:
-            import logging
-            _logger = logging.getLogger(__name__)
-            _logger.warning("[claude] Credit/billing limit — switching to Gemini")
+        _logger.warning(
+            f"[claude] tool-use {type(e).__name__} (model={model}): {str(e)[:400]}"
+        )
+        if _is_credit_or_billing(err_str):
+            _logger.warning("[claude] credit/billing limit — switching to Gemini")
             try:
                 from utils import gemini_client
                 return gemini_client.ask_with_tools(

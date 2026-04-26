@@ -2,6 +2,17 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.17.3] — 2026-04-27 — Stop misclassifying every Anthropic 400 as a credit problem
+
+Reports were stuck at "Synthesizing executive summary…" for 5+ minutes per call. Diagnosis: `claude_client.ask()` and `ask_with_tools()` had a too-loose check — every 400 from Anthropic fell through to the Gemini fallback chain on the assumption it was a credit/billing issue. In reality, the 400s were "prompt too long" / "invalid model" / "messages malformed" (root cause TBD; the previous code never logged the body so we couldn't see). The Gemini cascade then 429'd through 30+60+120s retries → Groq 429'd → ~5 min wasted per call before raising.
+
+### Fixed
+- `utils/claude_client.py` — extracted `_is_credit_or_billing()` with a tight whitelist of Anthropic's canonical credit/billing strings (`credit balance`, `usage limits`, `monthly usage limit`, `billing`, `payment required`). Only those trigger Gemini fallback. Everything else surfaces immediately so the user can fix the actual underlying cause.
+- `utils/claude_client::ask` and `ask_with_tools` — log the full Anthropic error body (first 400 chars) at WARNING level so future 400s diagnose themselves on first occurrence instead of staying invisible behind the cascade.
+
+### Added
+- `tests/test_claude_client_credit_branch.py` — 13 tests pinning the credit-detection contract. Six positive cases (each canonical Anthropic error string) and seven negatives (prompt-too-long, invalid model, rate-limit, etc. must NOT trigger fallback).
+
 ## [0.17.2] — 2026-04-27 — Single canonical URL: `prism-ros.vercel.app`
 
 The Vercel project had accumulated three half-working aliases (`prism.is-a.dev` 302'd to a splash page; `prism-intel.vercel.app` was squatted by another Vercel team after our project was deleted in an earlier reorg; `prism-three-alpha` was an auto-generated string nobody wanted). Consolidated to one clean canonical: `prism-ros.vercel.app`. The CORS allowlist is updated to match.
