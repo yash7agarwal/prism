@@ -292,11 +292,16 @@ def list_competitors(project_id: int = Query(...), db: Session = Depends(get_db)
     competitors page showed empty. The stats counter uses the same simpler
     `entity_type='company'` filter, so aligning here brings them in sync.
     """
+    # v0.18.4: filter out dismissed entities so purged competitors stop
+    # appearing in the list. trends-view already does this; bringing
+    # competitors into alignment.
     entities = (
         db.query(KnowledgeEntity)
         .filter(
             KnowledgeEntity.project_id == project_id,
             KnowledgeEntity.entity_type == "company",
+            (KnowledgeEntity.user_signal.is_(None))
+            | (KnowledgeEntity.user_signal != "dismissed"),
         )
         .order_by(KnowledgeEntity.name)
         .all()

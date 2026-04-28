@@ -2,6 +2,14 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.18.4] — 2026-04-28 — `/competitors` and `competitor_count` filter dismissed entities
+
+After v0.18.3 added the placeholder-name guard and we retro-purged 4 bad entities (2 placeholders on Platinum, self-references on Platinum + Sarvam), the entities were correctly marked `user_signal='dismissed'` but **still appeared on `/api/knowledge/competitors` and in `stats.competitor_count`** — those endpoints were missing the dismissed filter that `trends-view` had.
+
+### Fixed
+- `webapp/api/routes/knowledge.py:list_competitors` — query now excludes `user_signal='dismissed'`. Same predicate as the trends-view route.
+- `webapp/api/routes/projects.py:get_project` — `competitor_count` derivation now applies the same exclusion. The stats-consistency invariant (`test_stats_consistency.py`) requires `stats.competitor_count == len(/competitors)`; both must filter identically.
+
 ## [0.18.3] — 2026-04-28 — Reject "Competitor N" placeholders + request global category leaders + indirect competitors
 
 User report after the first successful report run: *"on Platinum I see competitors literally named 'Competitor 1' and 'Competitor 2'; on Sarvam only Indian companies are listed — why aren't OpenAI / Anthropic / Google Gemini there as competitors? I still don't see indirect competitors."* Two real bugs:

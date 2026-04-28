@@ -48,7 +48,15 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     entity_count = db.query(models.KnowledgeEntity).filter(models.KnowledgeEntity.project_id == project_id).count()
     observation_count = db.query(models.KnowledgeObservation).join(models.KnowledgeEntity).filter(models.KnowledgeEntity.project_id == project_id).count()
-    competitor_count = db.query(models.KnowledgeEntity).filter(models.KnowledgeEntity.project_id == project_id, models.KnowledgeEntity.entity_type == "company").count()
+    # v0.18.4: must filter dismissed to stay in sync with /competitors
+    # (which now filters dismissed). The stats-consistency invariant
+    # (test_stats_consistency.py) checks count == len(list).
+    competitor_count = db.query(models.KnowledgeEntity).filter(
+        models.KnowledgeEntity.project_id == project_id,
+        models.KnowledgeEntity.entity_type == "company",
+        (models.KnowledgeEntity.user_signal.is_(None))
+        | (models.KnowledgeEntity.user_signal != "dismissed"),
+    ).count()
     stats = schemas.ProjectStats(
         screen_count=db.query(models.Screen).filter(models.Screen.project_id == project_id).count(),
         edge_count=db.query(models.Edge).filter(models.Edge.project_id == project_id).count(),
