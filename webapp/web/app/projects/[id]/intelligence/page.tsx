@@ -21,21 +21,27 @@ import { api } from '@/lib/api'
 import type { ProductOSStatus, KnowledgeSummary, AgentSession, WorkItem } from '@/lib/types'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
+// v0.18.5: keys must be top-level orchestrator agent_types. The orchestrator
+// only knows: intel, ux_intel, impact_analysis, digest. competitive_intel
+// and industry_research are *legs* of the intel agent — clicking either
+// dispatched a 404 silently. Both cards now route to `intel` which runs
+// both legs in sequence; we keep them visually separate because the
+// surface concepts are distinct enough to deserve their own cards.
 const AGENTS = [
   {
-    key: 'competitive_intel',
+    key: 'intel',
     label: 'Competitive Intelligence',
     icon: Eye,
     color: 'amber',
-    description: 'Discovers competitors, researches their features, pricing, and recent moves. Generates deep competitor profiles with evidence.',
+    description: 'Discovers competitors (local + global category leaders + indirect substitutes), researches features, pricing, and recent moves. Runs alongside Industry Research as part of the same `intel` agent — clicking either card kicks off the same job.',
     examples: 'Recent output: competitor profiles, feature comparisons, pricing analyses',
   },
   {
-    key: 'industry_research',
+    key: 'intel',
     label: 'Industry Research',
     icon: MagnifyingGlass,
     color: 'sky',
-    description: 'Tracks industry trends, regulatory changes, market data, and analyst reports. Follows publications like Skift and PhocusWire.',
+    description: 'Tracks industry trends, regulatory changes, market data, and analyst reports. Runs alongside Competitive Intelligence as part of the same `intel` agent — clicking either card kicks off the same job.',
     examples: 'Recent output: trend reports, regulatory alerts, market sizing',
   },
   {
@@ -125,26 +131,33 @@ export default function IntelligencePage({ params }: { params: { id: string } })
 
   const handleRun = async (agentType: string) => {
     setRunningAgent(agentType)
+    setError(null)
     try {
       await api.runAgent(projectId, agentType)
       // Poll quickly to pick up the in_progress state
       setTimeout(fetchAll, 2000)
       setTimeout(fetchAll, 5000)
       setTimeout(fetchAll, 12000)
-    } catch {
-      setRunningAgent(null) // Clear on error
+    } catch (e) {
+      // v0.18.5: silent catches were hiding the real cause (e.g. 404 on
+      // unknown agent_type). Surface the error so users see WHY a run
+      // didn't start instead of a button that just resets.
+      setRunningAgent(null)
+      setError((e as Error).message || `Failed to start ${agentType}`)
     }
   }
 
   const handleRunAll = async () => {
     setRunningAgent('all')
+    setError(null)
     try {
       await api.runAllAgents(projectId)
       setTimeout(fetchAll, 2000)
       setTimeout(fetchAll, 5000)
       setTimeout(fetchAll, 12000)
-    } catch {
+    } catch (e) {
       setRunningAgent(null)
+      setError((e as Error).message || 'Failed to start agents')
     }
   }
 

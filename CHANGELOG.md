@@ -2,6 +2,17 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.18.5] — 2026-04-29 — Intelligence-tab Run buttons fired silently into 404
+
+User: *"I click on Run Competitive Intelligence but it stops and gets back to normal state again without any understanding of why it isn't starting."* The Intelligence tab's AGENTS array used `key='competitive_intel'` and `key='industry_research'` for the first two cards — but the orchestrator's valid agent_types are `intel`, `ux_intel`, `impact_analysis`, `digest`. `competitive_intel` and `industry_research` are *legs* of the `intel` agent, not standalone entries. Since v0.16.1, the `/api/product-os/run/{agent_type}` endpoint correctly returns 404 for unknown agent_types — but `intelligence/page.tsx`'s `handleRun` had a silent `catch {}` that swallowed it, leaving the user staring at a button that briefly went "Starting…" and reset.
+
+### Fixed
+- `webapp/web/app/projects/[id]/intelligence/page.tsx` — both "Competitive Intelligence" and "Industry Research" cards now route to `intel` (the top-level agent that runs both legs in sequence). Card descriptions updated to make the relationship explicit.
+- Same file — `handleRun` and `handleRunAll` now setError on catch instead of silent swallow, and the existing `<ErrorBanner />` (already wired to `error` state from v0.15.1) surfaces the message visibly.
+
+### Why this hid for so long
+v0.16.1's 404 fix was correct on the API side, but the Intelligence tab predates the rule. The Reports tab (v0.17.0) was built using `intel` correctly because I knew the gotcha by then — but the older Intelligence tab still had the legacy keys. Surfaced the moment the user actually tried to use a Run button after the cleanup.
+
 ## [0.18.4] — 2026-04-28 — `/competitors` and `competitor_count` filter dismissed entities
 
 After v0.18.3 added the placeholder-name guard and we retro-purged 4 bad entities (2 placeholders on Platinum, self-references on Platinum + Sarvam), the entities were correctly marked `user_signal='dismissed'` but **still appeared on `/api/knowledge/competitors` and in `stats.competitor_count`** — those endpoints were missing the dismissed filter that `trends-view` had.
