@@ -107,11 +107,14 @@ export default function IntelligencePage({ params }: { params: { id: string } })
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Auto-refresh while any agent is running
+  // Auto-refresh while any agent is running. v0.18.6: tightened from 8s
+  // to 3s so the live activity panel actually feels live, and we keep
+  // polling for 30s after the last in-progress item disappears so the
+  // user sees the final completed state without manual refresh.
   const hasActiveWork = workItems.some(i => i.status === 'in_progress')
   useEffect(() => {
     if (!hasActiveWork && !runningAgent) return
-    const iv = setInterval(fetchAll, 8000)
+    const iv = setInterval(fetchAll, 3000)
     return () => clearInterval(iv)
   }, [hasActiveWork, runningAgent, fetchAll])
 
@@ -185,6 +188,22 @@ export default function IntelligencePage({ params }: { params: { id: string } })
     )
   }
 
+  // v0.18.6: live activity feed — what's running RIGHT NOW + recent.
+  const inProgressNow = workItems.filter(i => i.status === 'in_progress')
+  const recentlyCompleted = [...workItems]
+    .filter(i => i.status === 'completed' || i.status === 'failed')
+    .sort((a, b) => (b.completed_at || '').localeCompare(a.completed_at || ''))
+    .slice(0, 5)
+
+  const fmtElapsed = (startedAt: string | null): string => {
+    if (!startedAt) return ''
+    const ms = Date.now() - new Date(startedAt).getTime()
+    if (ms < 0 || isNaN(ms)) return ''
+    const s = Math.floor(ms / 1000)
+    if (s < 60) return `${s}s`
+    return `${Math.floor(s / 60)}m ${s % 60}s`
+  }
+
   return (
     <div className="space-y-4">
       {error && <ErrorBanner message={error} />}
@@ -205,6 +224,71 @@ export default function IntelligencePage({ params }: { params: { id: string } })
           )}
         </button>
       </div>
+
+      {/* v0.18.6: live activity panel — shown whenever something is running
+           or recently finished. Replaces the old "Starting..." button-only
+           feedback that left users staring at a spinner with no detail. */}
+      {(inProgressNow.length > 0 || (runningAgent && !hasActiveWork)) && (
+        <div className="bg-zinc-900 border border-emerald-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CircleNotch size={14} className="animate-spin text-emerald-400" />
+            <span className="text-sm font-medium text-zinc-200">
+              {inProgressNow.length > 0
+                ? `${inProgressNow.length} item${inProgressNow.length > 1 ? 's' : ''} running`
+                : 'Starting agent…'}
+            </span>
+            <span className="text-xs text-zinc-500 ml-auto">refreshes every 3s</span>
+          </div>
+          {inProgressNow.length === 0 && (
+            <div className="text-xs text-zinc-500 italic pl-6">
+              Agent thread spawned. Searching, fetching pages, calling LLM.
+              First work item will appear here in 5–15s. If nothing shows in
+              30s, check the Backlog tab — the run may have stalled on
+              quota.
+            </div>
+          )}
+          {inProgressNow.map((item) => (
+            <div key={item.id} className="flex items-start gap-2 py-1.5 border-t border-zinc-800/50 first:border-0">
+              <CircleNotch size={11} className="animate-spin text-emerald-400 shrink-0 mt-1" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider">
+                  {item.agent_type} · {item.category}
+                </div>
+                <div className="text-sm text-zinc-200 line-clamp-2">
+                  {item.description || `(no description) — work item #${item.id}`}
+                </div>
+              </div>
+              <div className="text-xs text-zinc-500 font-mono shrink-0 mt-0.5">
+                {fmtElapsed(item.started_at)}
+              </div>
+            </div>
+          ))}
+          {recentlyCompleted.length > 0 && (
+            <details className="mt-3 pt-3 border-t border-zinc-800">
+              <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300">
+                Last {recentlyCompleted.length} finished
+              </summary>
+              <div className="mt-2 space-y-1">
+                {recentlyCompleted.map((item) => (
+                  <div key={item.id} className="flex items-start gap-2 text-xs">
+                    {item.status === 'completed' ? (
+                      <CheckCircle size={11} className="text-emerald-500 shrink-0 mt-0.5" weight="fill" />
+                    ) : (
+                      <XCircle size={11} className="text-red-400 shrink-0 mt-0.5" weight="fill" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <span className="text-zinc-400 font-mono">{item.agent_type}/{item.category}</span>
+                      {item.result_summary && (
+                        <span className="text-zinc-500"> — {item.result_summary.slice(0, 120)}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
 
       {/* Agent cards */}
       {AGENTS.map((agent) => {

@@ -2,6 +2,23 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.18.6] — 2026-04-29 — Live activity panel on Intelligence tab
+
+User: *"it's showing Starting but no idea if it's stuck or if something is happening."* The fix for v0.18.5's silent-404 bug got the agent firing, but the user had no visibility into what the agent was actually doing once spawned. Just a "Starting…" spinner until the run resolved 4–8 minutes later.
+
+### Added
+- A live-activity panel between the Run-all header and the agent cards, shown whenever something is in progress OR a run is queued. Surfaces:
+  - **Currently running work items** — `agent_type / category`, the work item description, an elapsed-time counter (e.g. `2m 14s`)
+  - **"Last 5 finished"** collapsible — green/red status icons + the result_summary so you can see what the agent actually concluded
+  - **Pre-spawn message** — if the run is queued but no work items are in-flight yet (the 5–15s gap), the panel says so explicitly with a hint to check the Backlog tab if it doesn't pick up in 30s
+- Polling cadence tightened from every 8s to every 3s while a run is active. Counter ticks visibly.
+
+### Changed
+- `webapp/web/app/projects/[id]/intelligence/page.tsx` — adds `inProgressNow` + `recentlyCompleted` derived state, `fmtElapsed()` helper, and the new panel JSX. Tightens the auto-refresh interval.
+
+### Why this surfaced now
+The silent-404 fix in v0.18.5 was the necessary precondition: previously buttons did nothing visible because the API never accepted the request. Now that requests succeed, the *real* UX gap (no progress visibility during multi-minute runs) is unmasked.
+
 ## [0.18.5] — 2026-04-29 — Intelligence-tab Run buttons fired silently into 404
 
 User: *"I click on Run Competitive Intelligence but it stops and gets back to normal state again without any understanding of why it isn't starting."* The Intelligence tab's AGENTS array used `key='competitive_intel'` and `key='industry_research'` for the first two cards — but the orchestrator's valid agent_types are `intel`, `ux_intel`, `impact_analysis`, `digest`. `competitive_intel` and `industry_research` are *legs* of the `intel` agent, not standalone entries. Since v0.16.1, the `/api/product-os/run/{agent_type}` endpoint correctly returns 404 for unknown agent_types — but `intelligence/page.tsx`'s `handleRun` had a silent `catch {}` that swallowed it, leaving the user staring at a button that briefly went "Starting…" and reset.
