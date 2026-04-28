@@ -624,6 +624,14 @@ Return ONLY a JSON array. Each item:
 
     def _tool_save_competitor(self, inp: dict) -> str:
         """Save a competitor company entity and optionally its app."""
+        # v0.18.3: guard at the tool boundary so the LLM cannot end-run
+        # the validation by emitting placeholders like "Competitor 1".
+        from agent.extraction_guard import validate_extraction
+        guard = validate_extraction(inp.get("name", ""), "company", self.project_name)
+        if not guard.ok:
+            logger.warning(f"[competitive_intel:save_competitor] dropped: {guard.reason}")
+            return json.dumps({"status": "rejected", "reason": guard.reason})
+
         metadata = inp.get("metadata") or {}
         if inp.get("website"):
             metadata["website"] = inp["website"]
@@ -779,18 +787,31 @@ Return ONLY a JSON array. Each item:
         """Build a targeted prompt based on work item category."""
         if category == "industry_identification":
             return (
-                f"You have ONE job: identify the direct competitors of {self.project_name} "
-                f"and save each one. Do NOT write an industry essay.\n\n"
+                f"You have ONE job: identify the competitors of {self.project_name} "
+                f"and save each one with a REAL company name. Do NOT write an industry essay.\n\n"
                 f"Product: {self.project_description}\n\n"
-                f"Steps:\n"
-                f"1. web_search for '{self.project_name} competitors' and "
-                f"'{self.project_name} alternatives 2025'\n"
-                f"2. For each real competitor found, call save_competitor with a "
-                f"one-sentence description of what makes them different from us\n"
-                f"3. Save ONE finding about our company's market position with a source URL\n"
-                f"4. Call finish_work\n\n"
-                f"Target: 5-8 competitors identified and saved. Do NOT research each one "
-                f"deeply yet — just identify and save. Deep profiles come later."
+                f"Search BOTH local and global angles to surface a mix:\n"
+                f"  a) '{self.project_name} competitors' — local/direct rivals\n"
+                f"  b) '{self.project_name} alternatives 2025' — alternatives users consider\n"
+                f"  c) Category-leader queries — search for the GLOBAL leaders in this category. "
+                f"     E.g. for an Indian LLM platform, that's OpenAI, Anthropic, Google Gemini, "
+                f"     Mistral, Cohere — not just Indian players. For a fintech startup in India, "
+                f"     also include Stripe, Square, PayPal alongside Razorpay. Customers compare "
+                f"     against the global category, not just the local one.\n"
+                f"  d) INDIRECT/substitute queries — what alternative ways do customers solve the "
+                f"     same job? (For an OTA: airline direct booking, Google Flights. For an LLM "
+                f"     platform: building in-house, off-the-shelf SaaS, etc.) Save these too.\n\n"
+                f"For each real competitor found, call save_competitor with a one-sentence "
+                f"description of what makes them different from us.\n\n"
+                f"HARD RULES (synthesizer hallucination guard):\n"
+                f"- NEVER save a placeholder name like 'Competitor 1', 'Company A', 'Player X', "
+                f"  or anything containing 'from the N findings'. The guard rejects these on write; "
+                f"  if you can't find a real name, save FEWER entities.\n"
+                f"- NEVER save {self.project_name} itself as a competitor.\n"
+                f"- Save 5-10 competitors, mix of (local direct + global category leaders + 1-2 indirect/substitutes). "
+                f"  Quality over quantity — a real-named competitor with one-line description beats 5 placeholders.\n\n"
+                f"Final step: save ONE finding about market position (with source_url), then "
+                f"call finish_work."
             )
 
         elif category == "competitor_discovery":

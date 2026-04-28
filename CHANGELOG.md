@@ -2,6 +2,21 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.18.3] — 2026-04-28 — Reject "Competitor N" placeholders + request global category leaders + indirect competitors
+
+User report after the first successful report run: *"on Platinum I see competitors literally named 'Competitor 1' and 'Competitor 2'; on Sarvam only Indian companies are listed — why aren't OpenAI / Anthropic / Google Gemini there as competitors? I still don't see indirect competitors."* Two real bugs:
+
+1. The `competitive_intel` synthesizer, when search returned recognizable findings but no nameable companies, fell back to numbered placeholders ("Competitor 1 from the 4 findings"). The save_competitor tool persisted them as-is.
+2. The `industry_identification` prompt's queries were too parochial — `"{project_name} competitors"` returns local players. For Indian projects (Sarvam, Krutrim) this excludes the global category leaders (OpenAI, Anthropic, Gemini) that customers actually compare against.
+
+### Fixed
+- `agent/extraction_guard.py` — added `_PLACEHOLDER_PATTERNS` (regex set) catching: `Competitor N`, `Company A`, `Player X`, `Example 1`, `from the N findings`, `TBD/TODO/XXX/N/A`, etc. The guard now rejects these patterns BEFORE persistence with reason `"placeholder/templated name"`. 16 new test cases pin both rejection (16 placeholder forms) and false-positive avoidance (real names with digits like "Sarvam.ai", "PVC Industries 2026 Annual Report" pass through).
+- `agent/competitive_intel_agent._tool_save_competitor` — guard runs at the tool boundary, not just at upsert. The LLM cannot end-run validation by emitting placeholder names.
+- `agent/competitive_intel_agent._build_work_prompt::industry_identification` — prompt rewritten to require: (a) local/direct queries, (b) alternatives queries, (c) **explicit category-leader queries with concrete examples** ("for an Indian LLM platform that's OpenAI, Anthropic, Gemini, Mistral, Cohere"), (d) **indirect/substitute queries** ("for an OTA: airline direct booking, Google Flights"). The prompt also explicitly forbids placeholder names with the rule: *"if you can't find a real name, save FEWER entities — quality over quantity."*
+
+### Why this matters
+Two regressions surfaced by the same bug class — synthesizer fallback to scaffolding text. v0.16.0's guard caught self-references and trivial generics but missed numbered placeholders because they're surface-distinct ("Competitor 1" doesn't match "Industry"/"Market"). Adding regex coverage is a one-time gate that will catch this class for every future synthesizer drift. Plus the prompt change addresses the deeper product issue: customers don't compare only locally, and reports should reflect the full competitive set.
+
 ## [0.18.2] — 2026-04-27 — Fix KnowledgeStore positional-arg mismatch in report persistence
 
 v0.18.1's first end-to-end run on Groq actually completed all six synthesis calls in ~12s — finally proving the architecture works under the new provider mix — but failed at the very last step (`Rendering Excel…`) with `KnowledgeStore.__init__() missing 1 required positional argument: 'project_id'`. The orchestrator was passing `(db, project_id)` while `KnowledgeStore` takes `(db, agent_type, project_id)`. Fixed.

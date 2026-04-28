@@ -64,6 +64,56 @@ def test_too_short_rejected():
     assert "too short" in (r.reason or "")
 
 
+# ---- v0.18.3: synthesizer placeholder rejection ----
+
+@pytest.mark.parametrize("placeholder", [
+    "Competitor 1",
+    "Competitor 2 from the 4 findings",  # actual UAT failure on Platinum project
+    "Competitor #3",
+    "competitor 1",
+    "Company A",
+    "Company X",
+    "Player B",
+    "Player 5",
+    "Example 1",
+    "Sample 2",
+    "Item 3",
+    "TBD",
+    "TODO",
+    "XXX",
+    "N/A",
+])
+def test_placeholder_names_rejected(placeholder):
+    r = validate_extraction(placeholder, "company", project_name="MyCo")
+    assert not r.ok, f"{placeholder!r} should be rejected as placeholder"
+    assert "placeholder" in (r.reason or "").lower() or "templated" in (r.reason or "").lower(), (
+        f"reason {r.reason!r} should mention placeholder/templated"
+    )
+
+
+@pytest.mark.parametrize("real_name", [
+    "OpenAI",
+    "Anthropic",
+    "Google Gemini",
+    "Mistral AI",
+    "Cohere",
+    "Krutrim",
+    "Sarvam.ai",  # legitimate real names that contain digits/dots/etc.
+    "Avi Additives Pvt Ltd",
+    "PVC Industries 2026 Annual Report",  # has a year — must not get caught by digit rules
+])
+def test_real_names_not_rejected_as_placeholders(real_name):
+    """Real company names — including ones with digits, dots, or year suffixes —
+    must NOT trip the placeholder detector. The patterns target leading
+    'Competitor N' / 'Company X' templates, not arbitrary digit appearance."""
+    r = validate_extraction(real_name, "company", project_name="ZebraCorp")
+    # If rejected, must be for a different reason (not placeholder)
+    if not r.ok:
+        assert "placeholder" not in (r.reason or "").lower(), (
+            f"real name {real_name!r} wrongly flagged as placeholder: {r.reason}"
+        )
+
+
 # ---- Category coercion ----
 
 @pytest.mark.parametrize("synth_category,expected_type", [

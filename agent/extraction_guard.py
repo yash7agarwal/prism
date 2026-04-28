@@ -49,6 +49,32 @@ _TRIVIAL_NAMES: frozenset[str] = frozenset({
     "competitor", "competitors", "company", "the market", "the industry",
 })
 
+# v0.18.3: regex patterns for synthesizer-hallucinated placeholder names.
+# Live UAT on project 6 produced literal entities named "Competitor 1 from
+# the 4 findings" / "Competitor 2 from the 4 findings" — the LLM, given
+# search results with no real company names, fell back to numbered
+# placeholders. The guard now rejects these patterns explicitly.
+_PLACEHOLDER_PATTERNS: tuple[re.Pattern, ...] = (
+    # "Competitor 1", "Competitor #2", "competitor 1 from the 4 findings", etc.
+    re.compile(r"^\s*(competitor|company|player|firm|entity|placeholder|brand|vendor|provider|name)\s*[#\d]", re.IGNORECASE),
+    # "Company A", "Player X" (single-letter labels)
+    re.compile(r"^\s*(competitor|company|player|firm|entity|brand|vendor|provider|name)\s+[A-Z](\b|$)", re.IGNORECASE),
+    # Anything containing "from the N findings" / "from these findings"
+    re.compile(r"\bfrom\s+(the|these)\s+\d*\s*findings?\b", re.IGNORECASE),
+    # "Example 1", "Sample 2" — synthesizer scaffolding leakage
+    re.compile(r"^\s*(example|sample|item|option)\s+\d", re.IGNORECASE),
+    # "TBD", "TODO", "XXX" placeholders
+    re.compile(r"^\s*(tbd|todo|xxx|n/a|tba|unknown)\s*[\.:]?\s*$", re.IGNORECASE),
+)
+
+
+def _is_placeholder_name(name: str) -> bool:
+    """True if the name matches a known synthesizer-placeholder pattern."""
+    for pattern in _PLACEHOLDER_PATTERNS:
+        if pattern.search(name):
+            return True
+    return False
+
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -113,6 +139,12 @@ def validate_extraction(
 
     if _normalize(n) in _TRIVIAL_NAMES:
         return ValidationResult(False, f"trivial generic name: {name!r}")
+
+    if _is_placeholder_name(n):
+        return ValidationResult(
+            False,
+            f"placeholder/templated name: {name!r} (synthesizer fallback pattern)",
+        )
 
     et = (entity_type or "").strip().lower()
     if et not in ALLOWED_ENTITY_TYPES:
