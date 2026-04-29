@@ -15,6 +15,7 @@ import type {
   ProductOSStatus,
   Project,
   ProjectDetail,
+  ProjectProgress,
   QueryResponse,
   Screen,
   TestCase,
@@ -223,6 +224,14 @@ export const api = {
   listWorkItems: (projectId: number, agentType?: string, status?: string) =>
     request<WorkItem[]>(
       `/api/knowledge/work-items?project_id=${projectId}${agentType ? `&agent_type=${agentType}` : ''}${status ? `&status=${status}` : ''}`
+    ),
+  // v0.20.0
+  projectProgress: (projectId: number) =>
+    request<ProjectProgress>(`/api/knowledge/project-progress?project_id=${projectId}`),
+  reapOrphans: (projectId: number) =>
+    request<{ reaped: number }>(
+      `/api/knowledge/work-items/reap-orphans?project_id=${projectId}`,
+      { method: 'POST' }
     ),
   listSessions: (projectId: number, agentType?: string) =>
     request<AgentSession[]>(

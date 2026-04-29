@@ -31,7 +31,7 @@ logging.basicConfig(
 app = FastAPI(
     title="Prism API",
     description="Product intelligence platform — competitive research, trends, impacts. UAT lives in Loupe.",
-    version="0.19.1",
+    version="0.20.0",
 )
 
 # CORS — locals for dev, Vercel + is-a.dev for prod. Extra comma-separated
@@ -78,6 +78,54 @@ def on_startup() -> None:
     init_db()
     log = logging.getLogger(__name__)
     log.info("Prism API started — DB initialized")
+
+    # v0.20.0: orphan reaper. Any work_item still in_progress on startup is
+    # by definition orphaned — the process that owned it has died (either a
+    # graceful redeploy or a crash). Without this, those rows sit in_progress
+    # forever, the daemon's session lock prevents re-runs, and the user sees
+    # a phantom "1 item running" badge for days. We mark them failed with a
+    # clear summary so they don't pollute the running-count and so the agent
+    # can pick them up again on the next generate_next_work() pass.
+    from datetime import datetime, timedelta
+    from webapp.api.db import SessionLocal as _SL
+    from webapp.api.models import WorkItem as _WI, AgentSession as _AS
+    _db = _SL()
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=10)
+        orphans = (
+            _db.query(_WI)
+            .filter(_WI.status == "in_progress")
+            .filter((_WI.started_at == None) | (_WI.started_at < cutoff))  # noqa: E711
+            .all()
+        )
+        for w in orphans:
+            w.status = "failed"
+            w.result_summary = (w.result_summary or "")[:200] + (
+                " | Orphaned (no active session at startup; reaped)"
+            )
+            w.completed_at = datetime.utcnow()
+        # Sessions stuck without completed_at older than 1h are also dead.
+        stale_cutoff = datetime.utcnow() - timedelta(hours=1)
+        stale_sessions = (
+            _db.query(_AS)
+            .filter(_AS.completed_at == None)  # noqa: E711
+            .filter(_AS.started_at < stale_cutoff)
+            .all()
+        )
+        for s in stale_sessions:
+            s.completed_at = datetime.utcnow()
+            s.session_summary = (s.session_summary or "") + " | Reaped at startup."
+        _db.commit()
+        if orphans or stale_sessions:
+            log.info(
+                "[startup-reaper] reaped %d orphaned work_items and %d stale sessions",
+                len(orphans), len(stale_sessions),
+            )
+    except Exception as exc:
+        log.error("[startup-reaper] failed: %s", exc, exc_info=True)
+        _db.rollback()
+    finally:
+        _db.close()
 
     # Auto-start the research orchestrator daemon per project, for production
     # deploys (Railway). Gated behind PRISM_AUTO_DAEMON=1 so local `uvicorn

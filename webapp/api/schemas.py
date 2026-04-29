@@ -303,6 +303,27 @@ class WorkItemOut(BaseModel):
     created_at: UTCDatetime
     started_at: UTCDatetime | None
     completed_at: UTCDatetime | None
+    # v0.20.0: heartbeat. None on legacy rows; UI treats None as "no signal".
+    last_progress_at: UTCDatetime | None = None
+
+
+class ProjectProgressOut(BaseModel):
+    """v0.20.0: project-level progress aggregator. Powers the header banner
+    and answers 'how much research is left?' without forcing the user to
+    open the Backlog tab and count rows."""
+    project_id: int
+    pending: int
+    in_progress: int
+    completed: int
+    failed: int
+    total: int
+    percent_complete: float  # rounded to 0.1
+    # Items in_progress with no heartbeat in >10 min — likely wedged. Already
+    # reaped on startup; surfaced here so users can spot mid-day stalls.
+    stalled: int
+    # avg ms per completed item over last 50 — feeds ETA. None if <5 samples.
+    avg_item_seconds: float | None
+    estimated_minutes_remaining: int | None
 
 
 class AgentSessionOut(BaseModel):

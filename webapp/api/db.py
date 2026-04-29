@@ -125,6 +125,14 @@ def init_db() -> None:
             if "quality_score_json" not in existing_cols:
                 conn.execute(text("ALTER TABLE agent_sessions ADD COLUMN quality_score_json JSON"))
 
+    # v0.20.0 — heartbeat column on work_items so the UI can distinguish
+    # "actively researching" from "stuck in_progress for 4 days".
+    if "work_items" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("work_items")}
+        with engine.begin() as conn:
+            if "last_progress_at" not in existing_cols:
+                conn.execute(text("ALTER TABLE work_items ADD COLUMN last_progress_at TIMESTAMP"))
+
 
 SCREENSHOTS_DIR = _DATA_DIR / "screenshots"
 

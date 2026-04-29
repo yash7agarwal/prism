@@ -206,9 +206,11 @@ class AutonomousAgent(ABC):
                 )
                 break
 
-            # Mark in progress
+            # Mark in progress + heartbeat
+            now = datetime.utcnow()
             item.status = "in_progress"
-            item.started_at = datetime.utcnow()
+            item.started_at = now
+            item.last_progress_at = now  # v0.20.0
             self.db.commit()
 
             logger.info(
@@ -221,6 +223,7 @@ class AutonomousAgent(ABC):
                 item.status = result.get("status", "completed")
                 item.result_summary = result.get("summary", "")
                 item.completed_at = datetime.utcnow()
+                item.last_progress_at = item.completed_at
                 items_completed += 1
                 knowledge_added += result.get("entities_created", 0)
                 knowledge_added += result.get("observations_added", 0)
@@ -234,6 +237,7 @@ class AutonomousAgent(ABC):
                 item.status = "failed"
                 item.result_summary = str(e)[:500]
                 item.completed_at = datetime.utcnow()
+                item.last_progress_at = item.completed_at
                 items_failed += 1
 
                 # If 2+ consecutive failures, stop the session — likely a systemic
@@ -245,6 +249,19 @@ class AutonomousAgent(ABC):
                     )
                     self.db.commit()
                     break
+            finally:
+                # v0.20.0: belt-and-suspenders — if anything escaped both
+                # branches (BaseException, abrupt return) and the row is
+                # still in_progress, flip it to failed so a process kill
+                # mid-loop doesn't leave a zombie. Hard SIGKILL still won't
+                # run this; that's why on_startup reaps too.
+                if item.status == "in_progress":
+                    item.status = "failed"
+                    item.result_summary = (item.result_summary or "") + (
+                        " | Aborted (status not transitioned in execute path)"
+                    )
+                    item.completed_at = datetime.utcnow()
+                    item.last_progress_at = item.completed_at
 
             self.db.commit()
 

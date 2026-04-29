@@ -185,6 +185,20 @@ export interface WorkItem {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  last_progress_at: string | null
+}
+
+export interface ProjectProgress {
+  project_id: number
+  pending: number
+  in_progress: number
+  completed: number
+  failed: number
+  total: number
+  percent_complete: number
+  stalled: number
+  avg_item_seconds: number | null
+  estimated_minutes_remaining: number | null
 }
 
 export interface AgentSession {

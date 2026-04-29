@@ -2,6 +2,28 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] — 2026-04-29 — Stop the phantom "1 running" — orphan reaper + heartbeat + project progress
+
+User report: *"every project has a running 1 item. Hard to tell when real research is happening vs stuck. No project-level progress signal — can't see how much work is left."*
+
+Audit confirmed it was actually worse: Platinum had **9 zombies stuck in_progress for 4+ days** (including two `competitor_profile` items literally titled "Competitor 1 from the 4 findings" — the placeholder bug v0.18.3 was supposed to prevent, predating that fix). Five of six projects had at least one phantom. Root causes: no `try/finally`, no startup orphan reaper, no heartbeat field, no project-level aggregation endpoint.
+
+### Added
+- **Startup orphan reaper** (`webapp/api/main.py:on_startup`) — any `WorkItem.status='in_progress'` whose `started_at` is older than 10 minutes is marked `failed` with summary `Orphaned (no active session at startup; reaped)`. Sessions stuck without `completed_at` for >1h are also closed. Runs on every Railway redeploy.
+- **`WorkItem.last_progress_at` heartbeat column** (`models.py` + idempotent migration in `db.py:init_db`). The agent loop writes it at start and at completion of each item. UI uses it to show heartbeat freshness.
+- **`POST /api/knowledge/work-items/reap-orphans`** — manual reaper for clearing stalls without redeploy. Optional `project_id` scopes the cleanup.
+- **`GET /api/knowledge/project-progress`** — single-call aggregator returning `{pending, in_progress, completed, failed, total, percent_complete, stalled, avg_item_seconds, estimated_minutes_remaining}`. Powers the new header banner.
+- **Project progress banner** (Intelligence tab) — `23/47 done · 49% · 12 pending · 1 active · ETA 1.2h` with a thin emerald progress bar. When stalled count > 0, shows a "Reap N stalled" link that POSTs `/reap-orphans` and refreshes.
+- **Heartbeat freshness badge** on every in-progress row — green if heartbeat <2m, amber 2–10m, red ≥10m with "possibly stalled" label.
+- **Belt-and-suspenders `try/finally`** in `agent/base_autonomous_agent.py:execute_work_item` — if anything escapes both happy/error branches and the row is still `in_progress`, flip it to `failed` so a Python-level abort doesn't leave a zombie. (Hard SIGKILL still won't run this; that's why `on_startup` reaps too.)
+
+### Changed
+- `WorkItemOut` schema now includes `last_progress_at` (nullable for legacy rows).
+- The orphan-reap link in the banner uses the same logic as the startup reaper, scoped per project.
+
+### Why this matters
+Before v0.20.0 the daemon's session lock would skip over orphaned `in_progress` items forever — they were stuck because nobody re-ran them, and nobody re-ran them because they appeared "still running." The reaper breaks that deadlock. The heartbeat closes the visibility gap: a stalled item now shows red + "possibly stalled" rather than spinning forever next to fresh ones. Project progress turns the Intelligence tab from "click around to see if anything's happening" into "23/47 done, ETA 1.2h."
+
 ## [0.19.1] — 2026-04-29 — Reseed-discovery endpoint so existing projects benefit from v0.19.0
 
 Existing projects (Sarvam, MakeMyTrip, Platinum) had already completed their `industry_identification` + `contrarian_discovery` seed work-items in older deploys. The next intel run found nothing pending in those categories and skipped the new LLM-as-search path entirely — silent no-op.

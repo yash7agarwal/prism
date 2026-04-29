@@ -18,7 +18,7 @@ import {
   Info,
 } from '@phosphor-icons/react'
 import { api } from '@/lib/api'
-import type { ProductOSStatus, KnowledgeSummary, AgentSession, WorkItem } from '@/lib/types'
+import type { ProductOSStatus, KnowledgeSummary, AgentSession, WorkItem, ProjectProgress } from '@/lib/types'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 // v0.18.5: keys must be top-level orchestrator agent_types. The orchestrator
@@ -84,26 +84,43 @@ export default function IntelligencePage({ params }: { params: { id: string } })
   const [status, setStatus] = useState<ProductOSStatus | null>(null)
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [sessions, setSessions] = useState<AgentSession[]>([])
+  const [progress, setProgress] = useState<ProjectProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [runningAgent, setRunningAgent] = useState<string | null>(null)
+  const [reaping, setReaping] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, items, sess] = await Promise.all([
+      const [s, items, sess, prog] = await Promise.all([
         api.productOSStatus(projectId),
         api.listWorkItems(projectId),
         api.listSessions(projectId),
+        api.projectProgress(projectId),
       ])
       setStatus(s)
       setWorkItems(items)
       setSessions(sess)
+      setProgress(prog)
       setError(null)
     } catch (err) {
       setError((err as Error).message || String(err))
     }
     setLoading(false)
   }, [projectId])
+
+  const handleReapOrphans = async () => {
+    setReaping(true)
+    try {
+      const r = await api.reapOrphans(projectId)
+      await fetchAll()
+      if (r.reaped === 0) setError('No stalled items found.')
+    } catch (e) {
+      setError((e as Error).message || 'Failed to reap orphans')
+    } finally {
+      setReaping(false)
+    }
+  }
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -204,9 +221,87 @@ export default function IntelligencePage({ params }: { params: { id: string } })
     return `${Math.floor(s / 60)}m ${s % 60}s`
   }
 
+  // v0.20.0: heartbeat freshness — green if <2m, amber if 2-10m, red if >10m
+  // (matches backend's stalled-cutoff at 10m). Returns badge text + tone.
+  const heartbeatBadge = (item: WorkItem): { text: string; tone: 'fresh' | 'warn' | 'stale' } | null => {
+    const hb = item.last_progress_at
+    if (!hb) return null
+    const ms = Date.now() - new Date(hb).getTime()
+    if (ms < 0 || isNaN(ms)) return null
+    const s = Math.floor(ms / 1000)
+    let label: string
+    if (s < 60) label = `heartbeat ${s}s ago`
+    else label = `heartbeat ${Math.floor(s / 60)}m ago`
+    if (s < 120) return { text: label, tone: 'fresh' }
+    if (s < 600) return { text: label, tone: 'warn' }
+    return { text: label, tone: 'stale' }
+  }
+
   return (
     <div className="space-y-4">
       {error && <ErrorBanner message={error} />}
+
+      {/* v0.20.0: project-level progress banner. Answers "how much research
+           is left?" without forcing a Backlog tab dive. Shown only when
+           there's at least one item — empty projects don't need it. */}
+      {progress && progress.total > 0 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <div className="flex items-center justify-between gap-4 mb-2">
+            <div className="flex items-baseline gap-3 text-sm">
+              <span className="text-zinc-200 font-medium">
+                {progress.completed}/{progress.total} done
+              </span>
+              <span className="text-zinc-500">·</span>
+              <span className="text-zinc-400">{progress.percent_complete}%</span>
+              {progress.pending > 0 && (
+                <>
+                  <span className="text-zinc-500">·</span>
+                  <span className="text-zinc-400">{progress.pending} pending</span>
+                </>
+              )}
+              {progress.in_progress > 0 && (
+                <>
+                  <span className="text-zinc-500">·</span>
+                  <span className="text-emerald-400">{progress.in_progress} active</span>
+                </>
+              )}
+              {progress.failed > 0 && (
+                <>
+                  <span className="text-zinc-500">·</span>
+                  <span className="text-red-400">{progress.failed} failed</span>
+                </>
+              )}
+              {progress.estimated_minutes_remaining !== null && progress.pending > 0 && (
+                <>
+                  <span className="text-zinc-500">·</span>
+                  <span className="text-zinc-400">
+                    ETA {progress.estimated_minutes_remaining < 60
+                      ? `${progress.estimated_minutes_remaining}m`
+                      : `${(progress.estimated_minutes_remaining / 60).toFixed(1)}h`}
+                  </span>
+                </>
+              )}
+            </div>
+            {progress.stalled > 0 && (
+              <button
+                onClick={handleReapOrphans}
+                disabled={reaping}
+                className="text-xs text-amber-300 hover:text-amber-200 underline underline-offset-2 disabled:opacity-50"
+                title="Mark stalled in_progress items as failed so the agent loop re-runs them"
+              >
+                {reaping ? 'Reaping…' : `Reap ${progress.stalled} stalled`}
+              </button>
+            )}
+          </div>
+          <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 transition-all"
+              style={{ width: `${progress.percent_complete}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Page intro + run all */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-zinc-500">
@@ -247,22 +342,34 @@ export default function IntelligencePage({ params }: { params: { id: string } })
               quota.
             </div>
           )}
-          {inProgressNow.map((item) => (
-            <div key={item.id} className="flex items-start gap-2 py-1.5 border-t border-zinc-800/50 first:border-0">
-              <CircleNotch size={11} className="animate-spin text-emerald-400 shrink-0 mt-1" />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider">
-                  {item.agent_type} · {item.category}
+          {inProgressNow.map((item) => {
+            const hb = heartbeatBadge(item)
+            const hbColor = hb?.tone === 'fresh'
+              ? 'text-emerald-400'
+              : hb?.tone === 'warn' ? 'text-amber-400' : 'text-red-400'
+            const spinnerColor = hb?.tone === 'stale' ? 'text-red-400' : 'text-emerald-400'
+            return (
+              <div key={item.id} className="flex items-start gap-2 py-1.5 border-t border-zinc-800/50 first:border-0">
+                <CircleNotch size={11} className={`animate-spin ${spinnerColor} shrink-0 mt-1`} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider">
+                    {item.agent_type} · {item.category}
+                  </div>
+                  <div className="text-sm text-zinc-200 line-clamp-2">
+                    {item.description || `(no description) — work item #${item.id}`}
+                  </div>
+                  {hb && (
+                    <div className={`text-[10px] font-mono mt-0.5 ${hbColor}`}>
+                      {hb.text}{hb.tone === 'stale' ? ' — possibly stalled' : ''}
+                    </div>
+                  )}
                 </div>
-                <div className="text-sm text-zinc-200 line-clamp-2">
-                  {item.description || `(no description) — work item #${item.id}`}
+                <div className="text-xs text-zinc-500 font-mono shrink-0 mt-0.5">
+                  {fmtElapsed(item.started_at)}
                 </div>
               </div>
-              <div className="text-xs text-zinc-500 font-mono shrink-0 mt-0.5">
-                {fmtElapsed(item.started_at)}
-              </div>
-            </div>
-          ))}
+            )
+          })}
           {recentlyCompleted.length > 0 && (
             <details className="mt-3 pt-3 border-t border-zinc-800">
               <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300">

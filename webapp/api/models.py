@@ -279,6 +279,12 @@ class WorkItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # v0.20.0: heartbeat. The agent loop writes this while a work item is
+    # in_progress so the UI can distinguish "actively researching" (recent
+    # heartbeat) from "wedged for 4 days" (stale heartbeat). Without this,
+    # the daemon's session lock means nobody re-runs an orphan, and the row
+    # sits in_progress forever after a process kill.
+    last_progress_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class CostLedger(Base):

@@ -28,6 +28,7 @@ from webapp.api.schemas import (
     AgentSessionOut,
     KnowledgeSummary,
     EntitySignalIn,
+    ProjectProgressOut,
 )
 
 VALID_SIGNALS = {"kept", "dismissed", "starred", "clear"}
@@ -821,6 +822,106 @@ def list_sessions(
     if agent_type:
         q = q.filter(AgentSession.agent_type == agent_type)
     return q.order_by(AgentSession.started_at.desc()).limit(limit).all()
+
+
+@router.get("/project-progress", response_model=ProjectProgressOut)
+def project_progress(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """v0.20.0: aggregate project-level work-item state for the header banner.
+
+    Answers 'how much research is left?' in one request. The frontend used to
+    have to fetch every work item and count them client-side, which scaled
+    badly once projects accumulated 500+ items.
+    """
+    from datetime import datetime, timedelta
+
+    rows = db.query(WorkItem.status, func.count(WorkItem.id)).filter(
+        WorkItem.project_id == project_id
+    ).group_by(WorkItem.status).all()
+    counts = {status: count for status, count in rows}
+    pending = counts.get("pending", 0)
+    in_prog = counts.get("in_progress", 0)
+    completed = counts.get("completed", 0)
+    failed = counts.get("failed", 0)
+    total = pending + in_prog + completed + failed
+
+    # Stalled = in_progress AND (no heartbeat OR heartbeat > 10m old). 10m
+    # is generous for slow-LLM cases; a real research call rarely takes
+    # longer than that without writing observations.
+    stall_cutoff = datetime.utcnow() - timedelta(minutes=10)
+    stalled = (
+        db.query(func.count(WorkItem.id))
+        .filter(
+            WorkItem.project_id == project_id,
+            WorkItem.status == "in_progress",
+        )
+        .filter(
+            (WorkItem.last_progress_at == None) |  # noqa: E711
+            (WorkItem.last_progress_at < stall_cutoff)
+        )
+        .scalar()
+    ) or 0
+
+    # ETA = pending * avg_seconds_per_completed_item over last 50 done.
+    last_50 = (
+        db.query(WorkItem.started_at, WorkItem.completed_at)
+        .filter(
+            WorkItem.project_id == project_id,
+            WorkItem.status == "completed",
+            WorkItem.started_at != None,  # noqa: E711
+            WorkItem.completed_at != None,  # noqa: E711
+        )
+        .order_by(WorkItem.completed_at.desc())
+        .limit(50)
+        .all()
+    )
+    durations = [(c - s).total_seconds() for s, c in last_50 if c and s and c > s]
+    avg_secs = sum(durations) / len(durations) if len(durations) >= 5 else None
+    eta_min = int((pending * avg_secs) / 60) if (avg_secs and pending) else None
+
+    pct = round((completed / total) * 100, 1) if total else 0.0
+    return ProjectProgressOut(
+        project_id=project_id,
+        pending=pending,
+        in_progress=in_prog,
+        completed=completed,
+        failed=failed,
+        total=total,
+        percent_complete=pct,
+        stalled=stalled,
+        avg_item_seconds=avg_secs,
+        estimated_minutes_remaining=eta_min,
+    )
+
+
+@router.post("/work-items/reap-orphans")
+def reap_orphans(
+    project_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """v0.20.0: manual trigger of the same orphan logic the startup hook runs.
+    Lets a user clear phantom 'in_progress' rows without redeploying. Scoped
+    by project if `project_id` provided, else all projects."""
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.utcnow() - timedelta(minutes=10)
+    q = db.query(WorkItem).filter(
+        WorkItem.status == "in_progress",
+    ).filter(
+        (WorkItem.last_progress_at == None) |  # noqa: E711
+        (WorkItem.last_progress_at < cutoff)
+    )
+    if project_id is not None:
+        q = q.filter(WorkItem.project_id == project_id)
+    orphans = q.all()
+    for w in orphans:
+        w.status = "failed"
+        w.result_summary = (w.result_summary or "")[:200] + " | Reaped (manual)"
+        w.completed_at = datetime.utcnow()
+    db.commit()
+    return {"reaped": len(orphans)}
 
 
 @router.post("/work-items/reseed-discovery")
