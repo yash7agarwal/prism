@@ -15,12 +15,19 @@ import {
 import { api } from '@/lib/api'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
+interface Observation {
+  content: string
+  source_url: string | null
+  recorded_at: string | null
+}
+
 interface GraphNode {
   id: string
   type: 'trend' | 'effect' | 'company'
   name: string
   description: string
   metadata: Record<string, any>
+  observations?: Observation[]
 }
 
 interface GraphEdge {
@@ -123,7 +130,11 @@ export default function ImpactsPage({ params }: { params: { id: string } }) {
                 <TrendUp size={20} className="text-emerald-400 mt-0.5 shrink-0" weight="duotone" />
                 <div className="min-w-0">
                   <h3 className="font-medium text-zinc-100">{trend.name}</h3>
-                  <p className="text-sm text-zinc-500 mt-0.5 line-clamp-2">{trend.description}</p>
+                  {/* v0.20.1: full description when expanded; clamp only in
+                       the collapsed list view to keep the row compact. */}
+                  <p className={`text-sm text-zinc-500 mt-0.5 ${isExpanded ? 'leading-relaxed whitespace-pre-line' : 'line-clamp-2'}`}>
+                    {trend.description}
+                  </p>
                   {trendEffects.length > 0 && (
                     <div className="flex items-center gap-3 mt-2 text-xs text-zinc-600">
                       <span>{trendEffects.length} effect{trendEffects.length !== 1 ? 's' : ''}</span>
@@ -147,18 +158,45 @@ export default function ImpactsPage({ params }: { params: { id: string } }) {
                         <span className="text-xs text-amber-400 font-medium">2nd order</span>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-zinc-300">{effect.name}</p>
+                        <p className="text-sm text-zinc-200 font-medium">{effect.name}</p>
+                        {/* v0.20.1: full text — no clamp. The expanded view is
+                             where the user explicitly asked to see detail. */}
                         {effect.description && effect.description !== effect.name && (
-                          <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{effect.description}</p>
+                          <p className="text-sm text-zinc-400 mt-1 leading-relaxed whitespace-pre-line">
+                            {effect.description}
+                          </p>
                         )}
                         {effect.metadata?.severity && (
-                          <div className="flex items-center gap-2 mt-1.5">
+                          <div className="flex items-center gap-2 mt-2">
                             <span className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_COLORS[effect.metadata.severity] || SEVERITY_COLORS.medium}`}>
                               {effect.metadata.severity}
                             </span>
                             {effect.metadata?.timeframe && (
                               <span className="text-xs text-zinc-600">{TIMEFRAME_LABELS[effect.metadata.timeframe] || effect.metadata.timeframe}</span>
                             )}
+                          </div>
+                        )}
+                        {effect.observations && effect.observations.length > 0 && (
+                          <div className="mt-2.5 pt-2.5 border-t border-zinc-800/50">
+                            <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Evidence</div>
+                            <ul className="space-y-1">
+                              {effect.observations.map((o: Observation, idx: number) => (
+                                <li key={idx} className="text-xs text-zinc-500 leading-relaxed">
+                                  <span className="text-zinc-600 mr-1">•</span>
+                                  <span>{o.content}</span>
+                                  {o.source_url && (
+                                    <a
+                                      href={o.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="ml-1.5 text-emerald-500/80 hover:text-emerald-400 underline underline-offset-2 break-all"
+                                    >
+                                      [source]
+                                    </a>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
                       </div>

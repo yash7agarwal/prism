@@ -2,6 +2,16 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.20.1] — 2026-04-29 — Impact tab: full effect text + evidence links
+
+User report: *"in the impact section only limited text is shown for 2nd order effect on expanding a trend — help expand it fully plus add the source / evidence."*
+
+The 2nd-order effect description was 500+ chars in the DB but the UI clamped it to 2 lines (~120 chars). The `/api/knowledge/impact-graph` endpoint also returned no source URLs at all — so even with full text shown, there was no way to verify a claim.
+
+### Changed
+- **`/api/knowledge/impact-graph`** now includes a top-3 `observations: [{content, source_url, recorded_at}]` list per `effect` and `trend` node. Single batched query per type — no N+1.
+- **Impact tab UI** — drops `line-clamp-2` from effect descriptions in the expanded view; renders an "Evidence" section below each 2nd-order effect with bulleted observations and a `[source]` link when a `source_url` exists. Trend description in the header also drops the clamp once a card is expanded.
+
 ## [0.20.0] — 2026-04-29 — Stop the phantom "1 running" — orphan reaper + heartbeat + project progress
 
 User report: *"every project has a running 1 item. Hard to tell when real research is happening vs stuck. No project-level progress signal — can't see how much work is left."*

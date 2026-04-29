@@ -725,6 +725,26 @@ def get_impact_graph(
     entity_map: dict[int, dict] = {}
     nodes = []
 
+    # v0.20.1: enrich trend nodes with their top observations too — same
+    # pattern as effects. The frontend uses these as evidence links.
+    trend_ids = [e.id for e in trends]
+    obs_by_trend: dict[int, list[dict]] = {}
+    if trend_ids:
+        trend_obs = (
+            db.query(KnowledgeObservation)
+            .filter(KnowledgeObservation.entity_id.in_(trend_ids))
+            .order_by(KnowledgeObservation.recorded_at.desc())
+            .all()
+        )
+        for o in trend_obs:
+            bucket = obs_by_trend.setdefault(o.entity_id, [])
+            if len(bucket) < 3:
+                bucket.append({
+                    "content": o.content or "",
+                    "source_url": o.source_url or None,
+                    "recorded_at": o.recorded_at.isoformat() if o.recorded_at else None,
+                })
+
     for e in trends:
         node = {
             "id": f"trend-{e.id}",
@@ -732,9 +752,31 @@ def get_impact_graph(
             "name": e.name,
             "description": e.description or "",
             "metadata": e.metadata_json or {},
+            "observations": obs_by_trend.get(e.id, []),
         }
         nodes.append(node)
         entity_map[e.id] = node
+
+    # v0.20.1: enrich effect nodes with top observations for the UI's
+    # "expand → show evidence" affordance. One query per effect would be
+    # N+1; batch by entity_id and group in Python instead.
+    effect_ids = [e.id for e in effects]
+    obs_by_effect: dict[int, list[dict]] = {}
+    if effect_ids:
+        obs_rows = (
+            db.query(KnowledgeObservation)
+            .filter(KnowledgeObservation.entity_id.in_(effect_ids))
+            .order_by(KnowledgeObservation.recorded_at.desc())
+            .all()
+        )
+        for o in obs_rows:
+            bucket = obs_by_effect.setdefault(o.entity_id, [])
+            if len(bucket) < 3:
+                bucket.append({
+                    "content": o.content or "",
+                    "source_url": o.source_url or None,
+                    "recorded_at": o.recorded_at.isoformat() if o.recorded_at else None,
+                })
 
     for e in effects:
         meta = e.metadata_json or {}
@@ -744,6 +786,7 @@ def get_impact_graph(
             "name": e.name,
             "description": e.description or "",
             "metadata": meta,
+            "observations": obs_by_effect.get(e.id, []),
         }
         nodes.append(node)
         entity_map[e.id] = node
