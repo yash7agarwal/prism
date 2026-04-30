@@ -17,3 +17,7 @@ webapp/web/node_modules/
 webapp/web/.next/
 webapp/web/out/
 webapp/web/next-env.d.ts
+
+# Local PDFs for bulk-upload testing — never commit (binary + potentially proprietary)
+Annual Reports/
+*.pdf
