@@ -59,12 +59,17 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
 
 export const api = {
   // Projects
-  listProjects: () => request<Project[]>('/api/projects'),
+  listProjects: (includeHidden = false) =>
+    request<Project[]>(`/api/projects${includeHidden ? '?include_hidden=true' : ''}`),
   getProject: (id: number) => request<ProjectDetail>(`/api/projects/${id}`),
   createProject: (data: { name: string; app_package?: string; description?: string; enable_intelligence?: boolean; industry?: string; competitors_hint?: string }) =>
     request<Project>('/api/projects', { method: 'POST', body: JSON.stringify(data) }),
   updateProject: (id: number, data: Partial<Project>) =>
     request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  hideProject: (id: number) =>
+    request<Project>(`/api/projects/${id}/hide`, { method: 'POST' }),
+  unhideProject: (id: number) =>
+    request<Project>(`/api/projects/${id}/unhide`, { method: 'POST' }),
   deleteProject: (id: number) =>
     request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
 

@@ -7,6 +7,7 @@ export interface Project {
   app_package: string | null
   description: string | null
   created_at: string
+  is_hidden?: boolean
 }
 
 export interface ProjectStats {

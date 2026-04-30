@@ -28,6 +28,10 @@ class Project(Base):
     app_package: Mapped[str | None] = mapped_column(String(200), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # v0.21.2: soft-hide. Default list view filters these out so the home
+    # page stays uncluttered without losing the data. Hard delete is still
+    # available for permanent removal.
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     screens: Mapped[list["Screen"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"

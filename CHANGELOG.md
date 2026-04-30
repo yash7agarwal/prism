@@ -2,6 +2,21 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.21.2] — 2026-04-30 — Hide / delete projects from the home page
+
+### Added
+- `Project.is_hidden` column (idempotent migration in `db.py`).
+- `POST /api/projects/{id}/hide` and `POST /api/projects/{id}/unhide` — soft-hide is recoverable; preserves all data.
+- `GET /api/projects?include_hidden=true` — surfaces hidden projects (for the "Show hidden" toggle). Default still filters them out.
+- Three-dot menu on each home-page card with **Hide from list** + **Delete permanently** (existing DELETE endpoint, now confirmation-gated). Hidden cards render at 60% opacity with a `hidden` badge; menu offers **Restore**.
+- "Show hidden" checkbox above the grid.
+- Undo affordance on the flash banner after hiding (one-click `unhide`).
+- Permanent-delete modal warns about cascade (competitors, observations, work items, reports, profiles all go).
+- 7 new tests pinning: default-list excludes hidden, `include_hidden` returns all, unhide restores, hide is idempotent, 404 on unknown id, delete works after hide, new projects default to visible.
+
+### Why this matters
+Cluttered project list and no recovery path for accidental cleanup. Hide gives a safe declutter; Delete handles permanent removal with a real confirmation. Existing DB rows backfilled with `is_hidden=FALSE` automatically by the additive migration.
+
 ## [0.21.1] — 2026-04-30 — Bulk folder upload + auto-classification + period detection
 
 User feedback: *"per-competitor PDF upload is too much friction. Let me drop a folder of mixed annual + quarterly reports for all competitors and have you organize them automatically. No hallucination — if you can't tell, mark unmatched."*

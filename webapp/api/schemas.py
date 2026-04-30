@@ -41,6 +41,7 @@ class ProjectOut(BaseModel):
     app_package: str | None
     description: str | None
     created_at: UTCDatetime
+    is_hidden: bool = False
 
 
 class ProjectStats(BaseModel):

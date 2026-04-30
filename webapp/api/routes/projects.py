@@ -1,7 +1,7 @@
 """Project CRUD routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from webapp.api import models, schemas
@@ -11,8 +11,17 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 @router.get("", response_model=list[schemas.ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
-    return db.query(models.Project).order_by(models.Project.created_at.desc()).all()
+def list_projects(
+    include_hidden: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """v0.21.2: hidden projects are filtered out by default. Pass
+    `include_hidden=true` to surface them (used by the home-page
+    "Show hidden" toggle so users can recover or hard-delete them)."""
+    q = db.query(models.Project)
+    if not include_hidden:
+        q = q.filter(models.Project.is_hidden == False)  # noqa: E712
+    return q.order_by(models.Project.created_at.desc()).all()
 
 
 @router.post("", response_model=schemas.ProjectOut, status_code=201)
@@ -87,8 +96,36 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
     return project
 
 
+@router.post("/{project_id}/hide", response_model=schemas.ProjectOut)
+def hide_project(project_id: int, db: Session = Depends(get_db)):
+    """v0.21.2: soft-hide. Recoverable via /unhide. Less destructive than
+    DELETE — preserves all observations, artifacts, work items."""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.is_hidden = True
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post("/{project_id}/unhide", response_model=schemas.ProjectOut)
+def unhide_project(project_id: int, db: Session = Depends(get_db)):
+    """v0.21.2: restore a soft-hidden project to the default list view."""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.is_hidden = False
+    db.commit()
+    db.refresh(project)
+    return project
+
+
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db)):
+    """Permanent delete. Cascades to screens, edges, plans, knowledge_*,
+    work_items via FK ondelete=CASCADE. Use /hide instead if recovery is
+    wanted."""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

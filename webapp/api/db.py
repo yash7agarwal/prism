@@ -133,6 +133,18 @@ def init_db() -> None:
             if "last_progress_at" not in existing_cols:
                 conn.execute(text("ALTER TABLE work_items ADD COLUMN last_progress_at TIMESTAMP"))
 
+    # v0.21.2 — soft-hide flag on projects.
+    if "projects" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("projects")}
+        with engine.begin() as conn:
+            if "is_hidden" not in existing_cols:
+                # Backend-agnostic: SQLite stores Boolean as INTEGER, Postgres
+                # as BOOLEAN. We use BOOLEAN with a numeric default — both
+                # engines coerce 0 / FALSE correctly.
+                conn.execute(text(
+                    "ALTER TABLE projects ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE NOT NULL"
+                ))
+
 
 SCREENSHOTS_DIR = _DATA_DIR / "screenshots"
 
