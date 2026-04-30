@@ -1181,6 +1181,226 @@ def auto_fetch_report(
     }
 
 
+@router.post("/projects/{project_id}/bulk-upload-reports")
+async def bulk_upload_reports(
+    project_id: int,
+    files: list[UploadFile] = File(...),
+    auto_synthesize: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """v0.21.1: bulk-upload a folder of PDFs and auto-allocate to the
+    matching competitor. Per-file flow:
+
+      1. Extract text via pypdf (in-memory).
+      2. Try filename substring match against competitor canonical names.
+      3. Fall back to LLM disambiguation (with explicit null option).
+      4. Extract fiscal_year + quarter from filename / first-page text.
+      5. Save raw extracted text as `KnowledgeArtifact(annual_report)` with
+         `entity_ids_json=[matched]` if matched, None if unmatched.
+
+    `auto_synthesize=true` (default): kick off business-history synthesis
+    per-matched-competitor in a thread pool after all files are saved.
+    Synthesis runs against the *aggregate* of all reports for that competitor
+    (aggregated text across multiple uploads), so multi-period uploads
+    fold into one rich profile.
+
+    Returns a manifest:
+      - matched: [{filename, entity, period, confidence}, ...]
+      - unmatched: [{filename, period, reason}, ...]
+      - failed: [{filename, error}, ...]
+    """
+    from agent.business_history import (
+        extract_text_from_pdf_bytes,
+        synthesize_business_profile,
+    )
+    from agent.bulk_report_classifier import classify, ClassifiedReport
+    from concurrent.futures import ThreadPoolExecutor
+    from webapp.api.models import Project
+    from collections import defaultdict
+
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    competitors_q = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.project_id == project_id,
+            KnowledgeEntity.entity_type == "company",
+        )
+        .all()
+    )
+    competitors = [{"id": c.id, "name": c.name, "canonical_name": c.canonical_name} for c in competitors_q]
+    if not competitors:
+        raise HTTPException(
+            status_code=400,
+            detail="No competitors yet. Run intel agent first so reports have somewhere to land."
+        )
+
+    matched: list[dict] = []
+    unmatched: list[dict] = []
+    failed: list[dict] = []
+    new_artifacts_by_entity: dict[int, list[int]] = defaultdict(list)
+
+    for f in files:
+        # File hygiene
+        try:
+            blob = await f.read()
+        except Exception as exc:
+            failed.append({"filename": f.filename, "error": f"read failed: {exc}"})
+            continue
+        if not blob:
+            failed.append({"filename": f.filename, "error": "empty"})
+            continue
+        if len(blob) > 50 * 1024 * 1024:
+            failed.append({"filename": f.filename, "error": "exceeds 50MB"})
+            continue
+
+        # Extract
+        text, meta = extract_text_from_pdf_bytes(blob)
+        if not text:
+            failed.append({"filename": f.filename, "error": meta.get("extraction_error") or "extraction yielded nothing"})
+            continue
+
+        # Classify
+        cr: ClassifiedReport = classify(f.filename or "report.pdf", text, competitors)
+
+        # Build artifact metadata
+        period_meta = {}
+        if cr.period:
+            period_meta = {
+                "fiscal_year": cr.period.fiscal_year,
+                "quarter": cr.period.quarter,
+                "period_label": cr.period.period_label,
+                "is_annual": cr.period.is_annual,
+            }
+
+        artifact = KnowledgeArtifact(
+            project_id=project_id,
+            artifact_type="annual_report" if (cr.period is None or cr.period.is_annual) else "quarterly_report",
+            title=(
+                f"{cr.matched_entity_name or 'Unmatched'} — "
+                f"{cr.period.period_label if cr.period else 'undated'} "
+                f"({f.filename})"
+            ),
+            content_md=text[:200_000],
+            entity_ids_json=[cr.matched_entity_id] if cr.matched_entity_id else None,
+            generated_by_agent=f"bulk_upload:{cr.match_method}",
+        )
+        db.add(artifact)
+        db.commit()
+        db.refresh(artifact)
+
+        record = {
+            "filename": f.filename,
+            "artifact_id": artifact.id,
+            "matched_entity_id": cr.matched_entity_id,
+            "matched_entity_name": cr.matched_entity_name,
+            "match_confidence": cr.match_confidence,
+            "match_method": cr.match_method,
+            "period": period_meta or None,
+            "reasoning": cr.reasoning,
+            "text_chars": cr.text_chars,
+        }
+        if cr.matched_entity_id and cr.match_confidence in ("high", "medium"):
+            matched.append(record)
+            new_artifacts_by_entity[cr.matched_entity_id].append(artifact.id)
+        else:
+            unmatched.append(record)
+
+    # Synthesize business profiles per matched competitor — parallel,
+    # capped to avoid pressure on Groq quota.
+    synth_count = 0
+    if auto_synthesize and new_artifacts_by_entity:
+        ent_map = {c.id: c for c in competitors_q}
+
+        def _synth(entity_id: int) -> int:
+            entity = ent_map.get(entity_id)
+            if not entity:
+                return 0
+            # Pull ALL annual+quarterly reports for this entity to feed the
+            # synthesis. Multi-report aggregation lets the synthesizer spot
+            # multi-period trends and contrarian patterns.
+            db_local = next(get_db())  # type: ignore[arg-type]
+            try:
+                arts = (
+                    db_local.query(KnowledgeArtifact)
+                    .filter(
+                        KnowledgeArtifact.project_id == project_id,
+                        KnowledgeArtifact.artifact_type.in_(("annual_report", "quarterly_report")),
+                    )
+                    .order_by(KnowledgeArtifact.generated_at.desc())
+                    .all()
+                )
+                relevant = [a for a in arts if a.entity_ids_json and entity_id in a.entity_ids_json]
+                sources = [
+                    {"title": a.title, "text": a.content_md or "", "year": ""}
+                    for a in relevant[:6]  # cap so we don't blow LLM context
+                ]
+                if not sources:
+                    return 0
+                profile = synthesize_business_profile(
+                    competitor=entity.name,
+                    project_name=project.name,
+                    project_description=project.description or "",
+                    sources=sources,
+                )
+                if not profile.market_thesis and not profile.contrarian_insights:
+                    return 0
+                prof_art = KnowledgeArtifact(
+                    project_id=project_id,
+                    artifact_type="business_history",
+                    title=f"Business history · {entity.name}",
+                    content_md=profile.to_markdown(),
+                    entity_ids_json=[entity_id],
+                    generated_by_agent="business_history_synth_bulk",
+                )
+                db_local.add(prof_art)
+                db_local.commit()
+                return 1
+            except Exception as exc:
+                logger.warning("[bulk_upload] synth failed for entity %s: %s", entity_id, exc)
+                return 0
+            finally:
+                db_local.close()
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            results = list(ex.map(_synth, list(new_artifacts_by_entity.keys())))
+        synth_count = sum(results)
+
+    return {
+        "matched_count": len(matched),
+        "unmatched_count": len(unmatched),
+        "failed_count": len(failed),
+        "synthesized_profiles": synth_count,
+        "matched": matched,
+        "unmatched": unmatched,
+        "failed": failed,
+    }
+
+
+@router.post("/artifacts/{artifact_id}/reassign")
+def reassign_artifact(
+    artifact_id: int,
+    entity_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """v0.21.1: manually reassign an unmatched / mis-matched bulk-uploaded
+    report to a specific competitor. Used by the manifest UI for the user
+    to fix LLM/regex misses without re-uploading.
+    """
+    art = db.get(KnowledgeArtifact, artifact_id)
+    if not art:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    entity = db.get(KnowledgeEntity, entity_id)
+    if not entity or entity.project_id != art.project_id:
+        raise HTTPException(status_code=400, detail="Entity not in this project")
+    art.entity_ids_json = [entity_id]
+    art.generated_by_agent = (art.generated_by_agent or "") + " | reassigned"
+    db.commit()
+    return {"reassigned": True, "artifact_id": artifact_id, "entity_id": entity_id}
+
+
 @router.get("/competitors/{entity_id}/business-history")
 def list_business_history(
     entity_id: int,

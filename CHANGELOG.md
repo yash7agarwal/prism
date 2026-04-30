@@ -2,6 +2,32 @@
 
 All notable changes are documented here following [Semantic Versioning](https://semver.org/).
 
+## [0.21.1] — 2026-04-30 — Bulk folder upload + auto-classification + period detection
+
+User feedback: *"per-competitor PDF upload is too much friction. Let me drop a folder of mixed annual + quarterly reports for all competitors and have you organize them automatically. No hallucination — if you can't tell, mark unmatched."*
+
+### Added
+- **`agent/bulk_report_classifier.py`** — per-file classification pipeline:
+  1. **Filename substring match** against competitor canonical names (deterministic, score ≥ 0.85 for verbatim match, no LLM call needed)
+  2. **LLM disambiguation fallback** when filename is ambiguous, with a forced `matched_entity_id: null` option for "no match" — the LLM is explicitly told there's no penalty for saying null
+  3. **Period extraction** via strict regex over filename + first-page text. Returns `None` if no explicit annual / quarterly cue exists — never invents a year or quarter. Bare 4-digit years are rejected unless context (`FY`, `10-K`, `Q3`, `annual`) confirms.
+  4. **Hallucination guards**: LLM-returned ids outside the competitor list are rejected; non-int ids rejected; malformed JSON treated as "no match."
+- **`POST /api/knowledge/projects/{project_id}/bulk-upload-reports`** — multipart accept of N PDFs, returns a manifest split into `matched` / `unmatched` / `failed`. Auto-synthesizes business profiles per matched competitor in a parallel thread pool (max 4 workers), aggregating across all uploaded reports for that competitor (multi-period folds in correctly).
+- **`POST /api/knowledge/artifacts/{artifact_id}/reassign?entity_id=X`** — manual fixup endpoint for unmatched / mis-classified artifacts. UI calls this when the user picks from the dropdown.
+- **Bulk upload UI** on the Industry Pulse tab: folder picker (Chromium `webkitdirectory`) + multi-PDF picker as fallback for browsers that don't support folder picking. Manifest collapsible with three sections: matched (filename → competitor → period), unmatched (with reassign dropdowns), failed (with error reasons).
+- **19 unit tests** covering period regex (filename/body, strict vs non-strict, bare-year rejection), filename match scoring, LLM null-answer handling, out-of-range id rejection, malformed JSON, end-to-end happy path, end-to-end no-match path.
+
+### Why this matters
+Before today, uploading reports for 12 competitors was 12 separate visits to 12 different competitor pages. Now: drop the folder once, get a manifest showing what landed where, fix the ~10% that need manual reassign via dropdown, and watch business profiles synthesize in parallel. Multi-period uploads (Q1 + Q2 + Q3 + Q4 + annual for the same company) automatically aggregate when the synthesizer runs over all that competitor's reports.
+
+### No-hallucination invariants verified by tests
+- `test_parse_period_strict_returns_none_for_bare_year` — a bare year alone never produces a period.
+- `test_parse_period_returns_none_when_no_year` — no year, no period.
+- `test_llm_classify_returns_null_when_llm_says_null` — null is a legal answer.
+- `test_llm_classify_rejects_id_not_in_competitor_list` — out-of-range id → null.
+- `test_llm_classify_rejects_non_int_id` — malformed → null.
+- `test_classify_unmatched_returns_none_id` — full no-match path is supported, not silently filled.
+
 ## [0.21.0] — 2026-04-29 — Business history + annual reports + SEC EDGAR + Industry Pulse
 
 User asked: *"build a business history section that tells about why this company makes or doesn't make sense in the market it is in, how is it performing, downloads the annual report of each listed competitor … structure that gives the option of manually selecting all the annual reports that can be consumed and then populate the respective competitor and make sense of the business landscape … identify various business models that are being followed, margins, nuances and business tricks, 'something about the business that you know but most people don't' kind of contrary details."*

@@ -285,6 +285,33 @@ export const api = {
       message?: string
       artifact_id?: number
     }>(`/api/knowledge/industry-pulse?project_id=${projectId}`, { timeoutMs: 120_000 }),
+  // v0.21.1: bulk folder upload + auto-classify
+  bulkUploadReports: async (projectId: number, files: File[], autoSynthesize = true) => {
+    const fd = new FormData()
+    files.forEach(f => fd.append('files', f))
+    const res = await fetch(
+      `/api/knowledge/projects/${projectId}/bulk-upload-reports?auto_synthesize=${autoSynthesize}`,
+      { method: 'POST', body: fd }
+    )
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Bulk upload failed: ${res.status} ${text.slice(0, 300)}`)
+    }
+    return res.json() as Promise<{
+      matched_count: number
+      unmatched_count: number
+      failed_count: number
+      synthesized_profiles: number
+      matched: any[]
+      unmatched: any[]
+      failed: any[]
+    }>
+  },
+  reassignArtifact: (artifactId: number, entityId: number) =>
+    request<{ reassigned: boolean }>(
+      `/api/knowledge/artifacts/${artifactId}/reassign?entity_id=${entityId}`,
+      { method: 'POST' }
+    ),
   listSessions: (projectId: number, agentType?: string) =>
     request<AgentSession[]>(
       `/api/knowledge/sessions?project_id=${projectId}${agentType ? `&agent_type=${agentType}` : ''}`
